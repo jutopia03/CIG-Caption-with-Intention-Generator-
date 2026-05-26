@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "cig"
+version = "0.1.0"
+description = "Caption with Intention Generator"
+requires-python = ">=3.10"
+dependencies = [
+    "openai-whisper",
+    "librosa",
+    "numpy",
+    "gradio>=4.0",
+    "ollama",
+    "pydantic>=2.0",
+    "python-dotenv",
+    "ffmpeg-python",
+    "torch",
+    "torchaudio",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "black",
+    "ruff",
+    "pre-commit",
+]
+
+[tool.black]
+line-length = 88
+target-version = ["py310"]
+
+[tool.ruff]
+line-length = 88
+select = ["E", "F", "I"]

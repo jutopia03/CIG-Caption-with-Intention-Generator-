@@ -1,0 +1,11 @@
+.env
+__pycache__/
+.venv/
+data/samples/*.mp4
+data/outputs/
+*.pyc
+*.pyo
+.pytest_cache/
+dist/
+*.egg-info/
+.ruff_cache/
