@@ -70,13 +70,14 @@ def tag_emotions(word_data: list[dict]) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def _split_into_sentences(word_data: list[dict]) -> list[list[dict]]:
-    """timestamp 간격(0.8s) 또는 단어 수(15개)를 기준으로 문장 단위로 분리한다."""
+    """timestamp 간격(0.8s), 단어 수(15개), 또는 화자 변경을 기준으로 문장 단위로 분리한다."""
     sentences: list[list[dict]] = []
     current: list[dict] = [word_data[0]]
 
     for prev, curr in zip(word_data, word_data[1:]):
         gap = curr["timestamp_start"] - prev["timestamp_end"]
-        if gap >= SENTENCE_GAP_SEC or len(current) >= SENTENCE_MAX_WORDS:
+        speaker_changed = curr.get("speaker") != prev.get("speaker")
+        if gap >= SENTENCE_GAP_SEC or len(current) >= SENTENCE_MAX_WORDS or speaker_changed:
             sentences.append(current)
             current = []
         current.append(curr)
