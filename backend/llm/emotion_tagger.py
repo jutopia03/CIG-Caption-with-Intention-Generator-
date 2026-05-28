@@ -24,26 +24,19 @@ FALLBACK_EMOTION = "neutral"
 logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = (
-    "You are an expert dialogue analyzer for accessibility subtitles.\n"
-    "Your tasks:\n"
-    "1. CORRECT speaker labels based on dialogue context (question→answer = different speakers)\n"
-    "2. Tag per-word emotion: joy, sadness, anger, neutral\n\n"
+    "You are a per-word emotion tagger for movie dialogue.\n"
+    "Your ONLY job is to assign an emotion to each word.\n\n"
+    "Valid emotions: joy, sadness, anger, neutral\n\n"
     "Emotion guidelines:\n"
     "- joy: happy, excited, relieved, playful expressions\n"
     "- anger: frustrated, demanding, aggressive, commanding tone\n"
     "- sadness: disappointed, regretful, sorrowful expressions\n"
     "- neutral: informational, calm, matter-of-fact statements\n\n"
-    "Speaker correction rules:\n"
-    "- If sentence A asks something and sentence B answers → different speakers\n"
-    "- If tone/topic shifts abruptly → likely different speaker\n"
-    "- Keep pyannote speaker labels if they seem correct\n"
-    "- Reassign if dialogue flow clearly suggests otherwise\n\n"
     "Return ONLY a JSON array, no markdown, no explanation.\n"
     "Format:\n"
     "[\n"
     "  {\n"
     "    \"sentence_id\": 1,\n"
-    "    \"speaker\": \"Character_A\",\n"
     "    \"text\": \"full sentence text\",\n"
     "    \"words\": [\n"
     "      {\"word\": \"word\", \"emotion\": \"neutral\"},\n"
@@ -134,24 +127,15 @@ def _call_llm_with_retry(sentences: list[list[dict]]) -> list[dict]:
 
 
 def _build_user_prompt(sentences: list[list[dict]]) -> str:
-    lines = [
-        "Analyze this movie dialogue. Correct speaker labels if needed and tag word emotions.",
-        "",
-        "Pyannote speaker assignments (may have errors):",
-    ]
+    lines = ["Tag the emotion of every word in the following sentences:", ""]
     for i, words in enumerate(sentences, start=1):
         text = " ".join(w["word"] for w in words)
         t_start = words[0]["timestamp_start"]
         t_end = words[-1]["timestamp_end"]
-        speaker = words[0].get("speaker", "Character_A")
-        lines.append(f"Sentence {i} [{speaker}] ({t_start:.1f}s-{t_end:.1f}s): '{text}'")
+        lines.append(f"Sentence {i} ({t_start:.1f}s-{t_end:.1f}s): '{text}'")
     lines.extend([
         "",
-        "Instructions:",
-        "- Tag each word with: joy, sadness, anger, or neutral",
-        "- Consider the FULL dialogue context for emotions",
-        "- Correct speaker if dialogue flow suggests different assignment",
-        "- Return JSON with sentence_id, speaker, text, words(word+emotion)",
+        "Return JSON array with sentence_id, text, and words (with emotion per word) for each sentence.",
     ])
     return "\n".join(lines)
 
@@ -250,7 +234,7 @@ def _merge_results(
                 }
             )
 
-        sentence_speaker: str = llm_sent.get("speaker", word_list[0].get("speaker", "Character_A"))
+        sentence_speaker: str = word_list[0].get("speaker", "Character_A")
         output.append(
             {
                 "sentence_id": llm_sent.get("sentence_id", sent_idx),
