@@ -19,31 +19,18 @@ SENTENCE_MAX_WORDS: int = 15    # 이 단어 수 이상이면 강제 분리
 
 VALID_EMOTIONS = {"joy", "sadness", "anger", "neutral"}
 FALLBACK_EMOTION = "neutral"
-FALLBACK_SPEAKER = "Character_A"
 
 logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = (
-    "You are a movie dialogue speaker identifier.\n"
-    "Your PRIMARY task is to identify WHO is speaking each sentence.\n\n"
-    "Rules for speaker identification:\n"
-    "- Analyze the CONVERSATION FLOW — dialogues alternate between speakers\n"
-    "- If sentence A asks a question and sentence B answers it,\n"
-    "  they are DIFFERENT speakers\n"
-    "- Look for dialogue patterns:\n"
-    "  A says something → B responds → A replies → B responds...\n"
-    "- Use content clues:\n"
-    "  'Give me a tab' vs 'I can't give you a tab' = different speakers\n"
-    "- Assign consistent speaker names throughout (Character_A, Character_B, etc)\n"
-    "- Never assign the same speaker to consecutive sentences\n"
-    "  unless it's clearly a monologue\n\n"
-    "Also assign per-word emotion: one of [joy, sadness, anger, neutral]\n\n"
+    "You are a per-word emotion tagger for movie dialogue.\n"
+    "Your ONLY job is to assign an emotion to each word.\n\n"
+    "Valid emotions: joy, sadness, anger, neutral\n\n"
     "Return ONLY a JSON array, no markdown, no explanation.\n"
     "Format:\n"
     "[\n"
     "  {\n"
     "    \"sentence_id\": 1,\n"
-    "    \"speaker\": \"Character_A\",\n"
     "    \"text\": \"full sentence text\",\n"
     "    \"words\": [\n"
     "      {\"word\": \"word\", \"emotion\": \"neutral\"},\n"
@@ -74,7 +61,6 @@ def tag_emotions(word_data: list[dict]) -> list[dict]:
     llm_results = _call_llm_with_retry(sentences)
 
     merged = _merge_results(sentences, llm_results)
-    merged = _validate_speakers(merged)
     logger.info("LLM 감정 추론 완료")
     return merged
 
@@ -128,13 +114,7 @@ def _call_llm_with_retry(sentences: list[list[dict]]) -> list[dict]:
 
 
 def _build_user_prompt(sentences: list[list[dict]]) -> str:
-    lines = [
-        "Identify speakers for this complete movie dialogue.",
-        "Remember: consecutive sentences are usually DIFFERENT speakers",
-        "unless clearly the same person continuing.",
-        "",
-        "Full dialogue:",
-    ]
+    lines = ["Tag the emotion of every word in the following sentences:", ""]
     for i, words in enumerate(sentences, start=1):
         text = " ".join(w["word"] for w in words)
         t_start = words[0]["timestamp_start"]
@@ -142,8 +122,7 @@ def _build_user_prompt(sentences: list[list[dict]]) -> str:
         lines.append(f"Sentence {i} ({t_start:.1f}s-{t_end:.1f}s): '{text}'")
     lines.extend([
         "",
-        "Assign speaker labels (Character_A, Character_B, etc).",
-        "Return JSON array with sentence_id, speaker, text, and words (with emotion per word) for each sentence.",
+        "Return JSON array with sentence_id, text, and words (with emotion per word) for each sentence.",
     ])
     return "\n".join(lines)
 
@@ -242,10 +221,11 @@ def _merge_results(
                 }
             )
 
+        sentence_speaker: str = word_list[0].get("speaker", "Character_A")
         output.append(
             {
                 "sentence_id": llm_sent.get("sentence_id", sent_idx),
-                "speaker":     llm_sent.get("speaker", FALLBACK_SPEAKER),
+                "speaker":     sentence_speaker,
                 "text":        llm_sent.get("text", " ".join(w["word"] for w in word_list)),
                 "words":       merged_words,
             }
@@ -254,38 +234,12 @@ def _merge_results(
     return output
 
 
-def _validate_speakers(sentences: list[dict]) -> list[dict]:
-    """연속된 짧은 문장(2단어 이하)의 화자 배정을 후처리로 보정한다.
-
-    앞뒤 문장이 같은 화자인데 현재 짧은 문장도 같은 화자로 배정된 경우,
-    단답형 대사는 다른 화자일 가능성이 높으므로 교정한다.
-    """
-    for i in range(1, len(sentences) - 1):
-        curr = sentences[i]
-        prev = sentences[i - 1]
-        next_s = sentences[i + 1]
-
-        word_count = len(curr["words"])
-
-        if (
-            word_count <= 2
-            and prev["speaker"] == next_s["speaker"]
-            and curr["speaker"] == prev["speaker"]
-        ):
-            all_speakers = list({s["speaker"] for s in sentences})
-            other_speakers = [sp for sp in all_speakers if sp != prev["speaker"]]
-            if other_speakers:
-                curr["speaker"] = other_speakers[0]
-
-    return sentences
-
-
 def _build_fallback(sentences: list[list[dict]]) -> list[dict]:
-    """LLM 완전 실패 시 emotion=neutral, speaker=Character_A로 채운 결과를 반환한다."""
+    """LLM 완전 실패 시 emotion=neutral, speaker는 첫 단어의 speaker 키에서 가져온다."""
     return [
         {
             "sentence_id": i,
-            "speaker":     FALLBACK_SPEAKER,
+            "speaker":     words[0].get("speaker", "Character_A"),
             "text":        " ".join(w["word"] for w in words),
             "words":       [
                 {**w, "emotion": FALLBACK_EMOTION}

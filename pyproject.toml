@@ -18,6 +18,7 @@ dependencies = [
     "ffmpeg-python",
     "torch",
     "torchaudio",
+    "pyannote.audio>=3.1",
 ]
 
 [project.optional-dependencies]

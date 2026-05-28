@@ -1,0 +1,80 @@
+"""backend.audio.diarization 유닛 테스트."""
+
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+from backend.audio.diarization import (
+    _assign_speakers,
+    _build_label_map,
+    diarize,
+)
+
+_WORDS = [
+    {"word": "hello", "timestamp_start": 0.5, "timestamp_end": 1.0},
+    {"word": "world", "timestamp_start": 2.5, "timestamp_end": 3.0},
+]
+
+
+def test_assign_speakers_basic() -> None:
+    segments = [(0.0, 2.0, "SPEAKER_00"), (2.0, 4.0, "SPEAKER_01")]
+    label_map = {"SPEAKER_00": "Character_A", "SPEAKER_01": "Character_B"}
+
+    result = _assign_speakers(_WORDS, segments, label_map, "Character_A")
+
+    assert result[0]["speaker"] == "Character_A"
+    assert result[1]["speaker"] == "Character_B"
+
+
+def test_assign_speakers_fallback() -> None:
+    segments = [(5.0, 6.0, "SPEAKER_00")]
+    label_map = {"SPEAKER_00": "Character_A"}
+    words = [{"word": "hi", "timestamp_start": 0.0, "timestamp_end": 1.0}]
+
+    result = _assign_speakers(words, segments, label_map, "Character_A")
+
+    assert result[0]["speaker"] == "Character_A"
+
+
+def test_build_label_map_order() -> None:
+    segments = [
+        (0.0, 1.0, "SPEAKER_01"),
+        (1.0, 2.0, "SPEAKER_00"),
+        (2.0, 3.0, "SPEAKER_01"),
+    ]
+
+    label_map = _build_label_map(segments)
+
+    assert label_map["SPEAKER_01"] == "Character_A"
+    assert label_map["SPEAKER_00"] == "Character_B"
+
+
+def test_diarize_fallback_on_missing_token(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("PYANNOTE_AUTH_TOKEN", raising=False)
+    dummy_audio = tmp_path / "audio.wav"
+    dummy_audio.write_bytes(b"")
+
+    result = diarize(str(dummy_audio), list(_WORDS))
+
+    assert all(w["speaker"] == "Character_A" for w in result)
+    for original, tagged in zip(_WORDS, result):
+        assert tagged["word"] == original["word"]
+        assert tagged["timestamp_start"] == original["timestamp_start"]
+        assert tagged["timestamp_end"] == original["timestamp_end"]
+
+
+def test_diarize_fallback_on_pipeline_error(tmp_path: Path) -> None:
+    dummy_audio = tmp_path / "audio.wav"
+    dummy_audio.write_bytes(b"")
+
+    with patch(
+        "backend.audio.diarization._run_diarization",
+        side_effect=RuntimeError("mock error"),
+    ):
+        result = diarize(str(dummy_audio), list(_WORDS))
+
+    assert all(w["speaker"] == "Character_A" for w in result)

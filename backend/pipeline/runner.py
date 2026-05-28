@@ -10,6 +10,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from backend.audio.analyzer import analyze
+from backend.audio.diarization import diarize
 from backend.llm.emotion_tagger import tag_emotions
 from backend.schemas.word_schema import Sentence
 from backend.stt.transcriber import transcribe_from_audio
@@ -65,10 +66,18 @@ def run(video_path: str | Path) -> list[dict]:
             raise RuntimeError(f"파이프라인 실패 [음향 분석 단계]: {e}") from e
         logger.info("음향 분석 완료: %.1f초", time.time() - t0)
 
-        # 3단계: LLM 감정 추론
+        # 3단계: 화자 분리
         t0 = time.time()
         try:
-            final_result = tag_emotions(analyzed_words)
+            diarized_words = diarize(str(tmp_audio), analyzed_words)
+        except Exception as e:
+            raise RuntimeError(f"파이프라인 실패 [화자 분리 단계]: {e}") from e
+        logger.info("화자 분리 완료: %.1f초", time.time() - t0)
+
+        # 4단계: LLM 감정 추론
+        t0 = time.time()
+        try:
+            final_result = tag_emotions(diarized_words)
         except Exception as e:
             raise RuntimeError(f"파이프라인 실패 [LLM 감정 추론 단계]: {e}") from e
         logger.info("LLM 감정 추론 완료: %.1f초", time.time() - t0)
@@ -80,8 +89,7 @@ def run(video_path: str | Path) -> list[dict]:
     # Pydantic 검증 — 스키마 위반 시 경고 후 raw dict 반환
     validated = _validate(final_result)
 
-    logger.info("파이프라인 완료: 총 %d개 문장", len(validated))
-    logger.info("전체 파이프라인 완료: %.1f초", time.time() - pipeline_start)
+    logger.info("파이프라인 완료: 총 %d개 문장, 전체 소요 %.1f초", len(validated), time.time() - pipeline_start)
     return validated
 
 
