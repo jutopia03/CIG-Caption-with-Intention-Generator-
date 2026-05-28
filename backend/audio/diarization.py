@@ -54,19 +54,19 @@ def _run_diarization(audio_path: Path) -> list[tuple[float, float, str]]:
     pipeline = Pipeline.from_pretrained(_PIPELINE_ID, token=auth_token)
     pipeline.to(torch.device(device))
 
-    diarization_result = pipeline(str(audio_path))
+    diarization_output = pipeline(str(audio_path))
 
-    # pyannote 4.x returns DiarizeOutput; 3.x returns Annotation
-    if hasattr(diarization_result, "itertracks"):
-        segments: list[tuple[float, float, str]] = [
-            (turn.start, turn.end, speaker)
-            for turn, _, speaker in diarization_result.itertracks(yield_label=True)
-        ]
-    else:
-        segments = [
-            (segment.start, segment.end, segment.speaker)
-            for segment in diarization_result
-        ]
+    # pyannote 4.x returns DiarizeOutput; actual Annotation is in .speaker_diarization
+    annotation = (
+        diarization_output.speaker_diarization
+        if hasattr(diarization_output, "speaker_diarization")
+        else diarization_output
+    )
+
+    segments: list[tuple[float, float, str]] = [
+        (turn.start, turn.end, speaker)
+        for turn, _, speaker in annotation.itertracks(yield_label=True)
+    ]
     logger.info("화자 분리 완료: %d개 구간 검출", len(segments))
     return segments
 
