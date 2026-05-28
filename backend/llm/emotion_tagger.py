@@ -16,6 +16,7 @@ LLM_MODEL: str = os.getenv("LLM_MODEL", "llama3.2")
 
 SENTENCE_GAP_SEC: float = 0.8   # 이 간격 이상이면 새 문장
 SENTENCE_MAX_WORDS: int = 15    # 이 단어 수 이상이면 강제 분리
+SENTENCE_BATCH_SIZE: int = 3    # LLM에 한 번에 보낼 최대 문장 수
 
 VALID_EMOTIONS = {"joy", "sadness", "anger", "neutral"}
 FALLBACK_EMOTION = "neutral"
@@ -70,9 +71,15 @@ def tag_emotions(word_data: list[dict]) -> list[dict]:
     sentences = _split_into_sentences(word_data)
     logger.info("LLM 감정 추론 시작: 총 %d개 문장", len(sentences))
 
-    llm_results = _call_llm_with_retry(sentences)
+    all_llm_results: list[dict] = []
+    for i in range(0, len(sentences), SENTENCE_BATCH_SIZE):
+        batch = sentences[i:i + SENTENCE_BATCH_SIZE]
+        batch_results = _call_llm_with_retry(batch)
+        for j, result in enumerate(batch_results):
+            result["sentence_id"] = i + j + 1
+        all_llm_results.extend(batch_results)
 
-    merged = _merge_results(sentences, llm_results)
+    merged = _merge_results(sentences, all_llm_results)
     logger.info("LLM 감정 추론 완료")
     return merged
 
