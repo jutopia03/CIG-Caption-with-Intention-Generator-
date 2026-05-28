@@ -51,7 +51,7 @@ def _run_diarization(audio_path: Path) -> list[tuple[float, float, str]]:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info("pyannote 파이프라인 로드 중 (device=%s)", device)
 
-    pipeline = Pipeline.from_pretrained(_PIPELINE_ID, use_auth_token=auth_token)
+    pipeline = Pipeline.from_pretrained(_PIPELINE_ID, token=auth_token)
     pipeline.to(torch.device(device))
 
     diarization = pipeline(str(audio_path))
