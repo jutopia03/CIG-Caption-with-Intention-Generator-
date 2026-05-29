@@ -1,4 +1,4 @@
-"""파이프라인 실행 모듈 — AssemblyAI STT+화자분리 → 음향 분석 → 감정 태깅을 결합하여 최종 JSON 생성."""
+"""파이프라인 실행 모듈 — STT → 음향 분석 → 감정 태깅을 결합하여 최종 JSON 생성."""
 
 import json
 import logging
@@ -10,9 +10,10 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from backend.audio.analyzer import analyze
+from backend.audio.diarization import diarize
 from backend.llm.emotion_tagger import tag_emotions
 from backend.schemas.word_schema import Sentence
-from backend.stt.assemblyai_transcriber import transcribe_with_speaker
+from backend.stt.transcriber import transcribe_from_audio
 
 load_dotenv()
 
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 def run(video_path: str | Path) -> list[dict]:
-    """영상 파일을 받아 AssemblyAI STT+화자분리 → 음향 분석 → 감정 태깅을 순서대로 실행한다.
+    """영상 파일을 받아 STT → 음향 분석 → 감정 태깅을 순서대로 실행한다.
 
     Args:
         video_path: 처리할 영상 파일 경로
@@ -49,13 +50,13 @@ def run(video_path: str | Path) -> list[dict]:
             raise RuntimeError(f"파이프라인 실패 [오디오 추출 단계]: {e}") from e
         logger.info("오디오 추출 완료")
 
-        # 1단계: AssemblyAI STT + 화자 분리
+        # 1단계: STT (추출된 오디오를 재사용 — 이중 추출 방지)
         t0 = time.time()
         try:
-            word_timestamps = transcribe_with_speaker(str(tmp_audio))
+            word_timestamps = transcribe_from_audio(tmp_audio)
         except Exception as e:
-            raise RuntimeError(f"파이프라인 실패 [AssemblyAI STT+화자분리 단계]: {e}") from e
-        logger.info("AssemblyAI STT+화자분리 완료: %.1f초", time.time() - t0)
+            raise RuntimeError(f"파이프라인 실패 [STT 단계]: {e}") from e
+        logger.info("STT 완료: %.1f초", time.time() - t0)
 
         # 2단계: 음향 분석
         t0 = time.time()
@@ -65,10 +66,18 @@ def run(video_path: str | Path) -> list[dict]:
             raise RuntimeError(f"파이프라인 실패 [음향 분석 단계]: {e}") from e
         logger.info("음향 분석 완료: %.1f초", time.time() - t0)
 
-        # 3단계: LLM 감정 추론
+        # 3단계: 화자 분리
         t0 = time.time()
         try:
-            final_result = tag_emotions(analyzed_words)
+            diarized_words = diarize(str(tmp_audio), analyzed_words)
+        except Exception as e:
+            raise RuntimeError(f"파이프라인 실패 [화자 분리 단계]: {e}") from e
+        logger.info("화자 분리 완료: %.1f초", time.time() - t0)
+
+        # 4단계: LLM 감정 추론
+        t0 = time.time()
+        try:
+            final_result = tag_emotions(diarized_words)
         except Exception as e:
             raise RuntimeError(f"파이프라인 실패 [LLM 감정 추론 단계]: {e}") from e
         logger.info("LLM 감정 추론 완료: %.1f초", time.time() - t0)

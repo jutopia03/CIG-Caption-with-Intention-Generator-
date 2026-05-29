@@ -49,7 +49,6 @@ def _call_assemblyai(audio_path: Path):  # type: ignore[return]
 
     config = aai.TranscriptionConfig(
         speaker_labels=True,
-        word_boost=[],
         language_code="en",
     )
 
