@@ -1,4 +1,4 @@
-"""파이프라인 실행 모듈 — STT → 음향 분석 → 감정 태깅을 결합하여 최종 JSON 생성."""
+"""파이프라인 실행 모듈 — STT+화자분리 → 음향 분석 → 감정 태깅을 결합하여 최종 JSON 생성."""
 
 import json
 import logging
@@ -10,10 +10,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from backend.audio.analyzer import analyze
-from backend.audio.diarization import diarize
 from backend.llm.emotion_tagger import tag_emotions
 from backend.schemas.word_schema import Sentence
-from backend.stt.transcriber import transcribe_from_audio
+from backend.stt.assemblyai_transcriber import transcribe_with_speaker
 
 load_dotenv()
 
@@ -23,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 def run(video_path: str | Path) -> list[dict]:
-    """영상 파일을 받아 STT → 음향 분석 → 감정 태깅을 순서대로 실행한다.
+    """영상 파일을 받아 AssemblyAI STT+화자분리 → 음향 분석 → 감정 태깅을 순서대로 실행한다.
 
     Args:
         video_path: 처리할 영상 파일 경로
@@ -50,13 +49,13 @@ def run(video_path: str | Path) -> list[dict]:
             raise RuntimeError(f"파이프라인 실패 [오디오 추출 단계]: {e}") from e
         logger.info("오디오 추출 완료")
 
-        # 1단계: STT (추출된 오디오를 재사용 — 이중 추출 방지)
+        # 1단계: AssemblyAI STT + 화자 분리
         t0 = time.time()
         try:
-            word_timestamps = transcribe_from_audio(tmp_audio)
+            word_timestamps = transcribe_with_speaker(str(tmp_audio))
         except Exception as e:
-            raise RuntimeError(f"파이프라인 실패 [STT 단계]: {e}") from e
-        logger.info("STT 완료: %.1f초", time.time() - t0)
+            raise RuntimeError(f"파이프라인 실패 [AssemblyAI STT+화자분리 단계]: {e}") from e
+        logger.info("AssemblyAI STT+화자분리 완료: %.1f초", time.time() - t0)
 
         # 2단계: 음향 분석
         t0 = time.time()
@@ -66,18 +65,10 @@ def run(video_path: str | Path) -> list[dict]:
             raise RuntimeError(f"파이프라인 실패 [음향 분석 단계]: {e}") from e
         logger.info("음향 분석 완료: %.1f초", time.time() - t0)
 
-        # 3단계: 화자 분리
+        # 3단계: LLM 감정 추론
         t0 = time.time()
         try:
-            diarized_words = diarize(str(tmp_audio), analyzed_words)
-        except Exception as e:
-            raise RuntimeError(f"파이프라인 실패 [화자 분리 단계]: {e}") from e
-        logger.info("화자 분리 완료: %.1f초", time.time() - t0)
-
-        # 4단계: LLM 감정 추론
-        t0 = time.time()
-        try:
-            final_result = tag_emotions(diarized_words)
+            final_result = tag_emotions(analyzed_words)
         except Exception as e:
             raise RuntimeError(f"파이프라인 실패 [LLM 감정 추론 단계]: {e}") from e
         logger.info("LLM 감정 추론 완료: %.1f초", time.time() - t0)
@@ -86,7 +77,6 @@ def run(video_path: str | Path) -> list[dict]:
         if tmp_audio is not None and tmp_audio.exists():
             tmp_audio.unlink()
 
-    # Pydantic 검증 — 스키마 위반 시 경고 후 raw dict 반환
     validated = _validate(final_result)
 
     logger.info("파이프라인 완료: 총 %d개 문장, 전체 소요 %.1f초", len(validated), time.time() - pipeline_start)
@@ -94,12 +84,7 @@ def run(video_path: str | Path) -> list[dict]:
 
 
 def save_result(result: list[dict], output_path: str) -> None:
-    """결과를 JSON 파일로 저장한다.
-
-    Args:
-        result: run()의 반환값
-        output_path: 저장할 파일 경로 (부모 디렉토리가 없으면 자동 생성)
-    """
+    """결과를 JSON 파일로 저장한다."""
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
@@ -107,13 +92,9 @@ def save_result(result: list[dict], output_path: str) -> None:
     logger.info("결과 저장 완료: %s", path)
 
 
-# ---------------------------------------------------------------------------
-# 내부 헬퍼
-# ---------------------------------------------------------------------------
-
 def _extract_audio(video_path: Path) -> Path:
     """ffmpeg로 영상에서 16kHz mono WAV를 임시 파일로 추출한다."""
-    import ffmpeg  # 런타임 의존성 — 테스트 시 모킹 가능
+    import ffmpeg
 
     tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
     tmp.close()
@@ -135,10 +116,7 @@ def _extract_audio(video_path: Path) -> Path:
 
 
 def _validate(result: list[dict]) -> list[dict]:
-    """Pydantic으로 최종 결과를 검증하고 직렬화 가능한 dict로 반환한다.
-
-    검증 실패 시 경고를 로깅하고 원본 dict를 그대로 반환한다.
-    """
+    """Pydantic으로 최종 결과를 검증하고 직렬화 가능한 dict로 반환한다."""
     validated: list[dict] = []
     for item in result:
         try:
@@ -148,10 +126,6 @@ def _validate(result: list[dict]) -> list[dict]:
             validated.append(item)
     return validated
 
-
-# ---------------------------------------------------------------------------
-# CLI 진입점
-# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     import sys
