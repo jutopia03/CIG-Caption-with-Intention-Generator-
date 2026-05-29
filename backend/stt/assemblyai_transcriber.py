@@ -50,6 +50,7 @@ def _call_assemblyai(audio_path: Path):  # type: ignore[return]
     config = aai.TranscriptionConfig(
         speaker_labels=True,
         language_code="en",
+        speech_model=aai.SpeechModel.best,
     )
 
     return aai.Transcriber().transcribe(str(audio_path), config)
