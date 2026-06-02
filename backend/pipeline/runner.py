@@ -14,14 +14,64 @@ from backend.llm.emotion_tagger import tag_emotions
 from backend.schemas.word_schema import Sentence
 from backend.stt.assemblyai_transcriber import transcribe_with_speaker
 
+from collections.abc import Callable
+from dataclasses import dataclass
+
 load_dotenv()
 
 OUTPUT_DIR: Path = Path(os.getenv("OUTPUT_DIR", "data/outputs"))
 
 logger = logging.getLogger(__name__)
 
+ProgressCallback = Callable[[int, str, int, int], None]
 
-def run(video_path: str | Path) -> list[dict]:
+
+@dataclass(frozen=True)
+class PipelineStep:
+    name: str
+    percent: int
+    message: str
+    enabled: Callable[[str], bool] = lambda output_lang: True
+
+
+PIPELINE_STEPS: list[PipelineStep] = [
+    PipelineStep("ffmpeg", 10, "ffmepeg 완료"),
+    PipelineStep("assemblyai", 30, "Assemblyai 완료"),
+    PipelineStep("librosa", 50, "librosa 완료"),
+    PipelineStep("llm", 70, "LLM 완료"),
+    PipelineStep("pydantic", 90, "Pydantic 완료"),
+    PipelineStep("json", 100, "JSON 저장 완료"),
+]
+
+
+def get_active_steps(output_lang: str) -> list[PipelineStep]:
+    return [step for step in PIPELINE_STEPS if step.enabled(output_lang)]
+
+
+def notify_progress(
+    progress_callback: ProgressCallback | None,
+    active_steps: list[PipelineStep],
+    step_name: str,
+) -> None:
+    if progress_callback is None:
+        return
+
+    for index, step in enumerate(active_steps):
+        if step.name == step_name:
+            progress_callback(
+                step.percent,
+                step.message,
+                index + 1,
+                len(active_steps),
+            )
+            return
+
+
+def run(
+    video_path: str | Path,
+    output_lang: str = "ko",
+    progress_callback: ProgressCallback | None = None,
+) -> list[dict]:
     """영상 파일을 받아 AssemblyAI STT+화자분리 → 음향 분석 → 감정 태깅을 순서대로 실행한다.
 
     Args:
@@ -40,6 +90,8 @@ def run(video_path: str | Path) -> list[dict]:
 
     logger.info("파이프라인 시작: %s", video_path)
     pipeline_start = time.time()
+    
+    active_steps = get_active_steps(output_lang)
 
     tmp_audio: Path | None = None
     try:
@@ -48,6 +100,12 @@ def run(video_path: str | Path) -> list[dict]:
         except Exception as e:
             raise RuntimeError(f"파이프라인 실패 [오디오 추출 단계]: {e}") from e
         logger.info("오디오 추출 완료")
+        
+        notify_progress(
+            progress_callback,
+            active_steps,
+            "ffmpeg",
+        )
 
         # 1단계: AssemblyAI STT + 화자 분리
         t0 = time.time()
@@ -56,6 +114,11 @@ def run(video_path: str | Path) -> list[dict]:
         except Exception as e:
             raise RuntimeError(f"파이프라인 실패 [AssemblyAI STT+화자분리 단계]: {e}") from e
         logger.info("AssemblyAI STT+화자분리 완료: %.1f초", time.time() - t0)
+        notify_progress(
+            progress_callback,
+            active_steps,
+            "assemblyai",
+        )
 
         # 2단계: 음향 분석
         t0 = time.time()
@@ -64,6 +127,11 @@ def run(video_path: str | Path) -> list[dict]:
         except Exception as e:
             raise RuntimeError(f"파이프라인 실패 [음향 분석 단계]: {e}") from e
         logger.info("음향 분석 완료: %.1f초", time.time() - t0)
+        notify_progress(
+            progress_callback,
+            active_steps,
+            "librosa",
+        )
 
         # 3단계: LLM 감정 추론
         t0 = time.time()
@@ -72,12 +140,33 @@ def run(video_path: str | Path) -> list[dict]:
         except Exception as e:
             raise RuntimeError(f"파이프라인 실패 [LLM 감정 추론 단계]: {e}") from e
         logger.info("LLM 감정 추론 완료: %.1f초", time.time() - t0)
+        notify_progress(
+            progress_callback,
+            active_steps,
+            "llm",
+        )
+        
+        # TODO: 팀원5 번역 모듈 연결 예정
+        # output_lang == "ko"일 때 LLM 이후 실행되지만,
+        # 진행률 표시는 작업지시서 기준 6단계를 유지한다.
 
     finally:
         if tmp_audio is not None and tmp_audio.exists():
             tmp_audio.unlink()
 
     validated = _validate(final_result)
+    
+    notify_progress(
+        progress_callback,
+        active_steps,
+        "pydantic",
+    )
+
+    notify_progress(
+        progress_callback,
+        active_steps,
+        "json",
+    )
 
     logger.info("파이프라인 완료: 총 %d개 문장, 전체 소요 %.1f초", len(validated), time.time() - pipeline_start)
     return validated

@@ -230,12 +230,17 @@ def generate_subtitle_html(result: list[dict], filename: str) -> str:
 # Gradio 이벤트 핸들러
 # ---------------------------------------------------------------------------
 
-def process_video(video_file: object) -> tuple[str, str]:
+def process_video(
+    video_file: object,
+    output_lang: str,
+    progress: gr.Progress = gr.Progress(),
+) -> tuple[str, str]:
     """자막 생성 버튼 클릭 시 호출되는 핸들러.
 
     Args:
         video_file: gr.File()이 반환하는 객체.
                     Gradio 버전에 따라 str / NamedString / dict 형태.
+        output_lang: 출력 언어 코드. "ko"일 때 번역 단계가 포함된다.
 
     Returns:
         (player_html, status_text)
@@ -262,7 +267,22 @@ def process_video(video_file: object) -> tuple[str, str]:
 
         logger.info("UI: 파이프라인 시작 — %s", dst_path)
 
-        result = run(dst_path)
+        def update_progress(
+            percent: int,
+            message: str,
+            current: int,
+            total: int,
+        ) -> None:
+            progress(
+                percent / 100,
+                 desc=f"⏳ {message} ({current}/{total} 단계)",
+            )
+
+        result = run(
+            dst_path,
+            output_lang=output_lang,
+            progress_callback=update_progress,
+        )
 
         stem        = Path(dst_path).stem
         output_path = OUTPUT_DIR / f"{stem}_result.json"
@@ -293,7 +313,28 @@ def process_video(video_file: object) -> tuple[str, str]:
 
 def build_ui() -> gr.Blocks:
     """Gradio Blocks UI를 빌드하고 반환한다."""
-    with gr.Blocks(title="CIG — Caption with Intention Generator") as demo:
+    with gr.Blocks(
+        title="CIG — Caption with Intention Generator",
+        css="""
+        .cig-spinner {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            margin-right: 6px;
+            border: 2px solid rgba(255, 255, 255, 0.35);
+            border-top-color: #ffffff;
+            border-radius: 50%;
+            animation: cig-spin 0.8s linear infinite;
+            vertical-align: -2px;
+        }
+
+        @keyframes cig-spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+        """,
+    ) as demo:
         gr.Markdown("# CIG — Caption with Intention Generator")
         gr.Markdown(
             "영상을 업로드하고 **자막 생성**을 누르면 "
@@ -305,6 +346,12 @@ def build_ui() -> gr.Blocks:
             file_types=[".mp4", ".mkv", ".avi"],
         )
 
+        output_lang = gr.Dropdown(
+            choices=["ko", "en"],
+            value="ko",
+            label="출력 언어",
+        )
+
         generate_btn = gr.Button("자막 생성", variant="primary")
 
         status_box = gr.Textbox(
@@ -313,22 +360,22 @@ def build_ui() -> gr.Blocks:
             placeholder="영상을 업로드한 뒤 '자막 생성'을 클릭하세요.",
         )
 
-        # video 태그 + 자막 오버레이를 모두 담는 단일 HTML 컴포넌트
         player_html = gr.HTML()
 
         generate_btn.click(
             fn=process_video,
-            inputs=[video_file],
+            inputs=[video_file, output_lang],
             outputs=[player_html, status_box],
+            show_progress="minimal",
+            show_progress_on=[player_html],
         )
 
-        # Gradio의 <script> 차단을 우회해 자막 JS를 안전하게 등록
         demo.load(fn=None, js=_SUBTITLE_JS)
 
     return demo
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- 
 # 진입점
 # ---------------------------------------------------------------------------
 
