@@ -30,6 +30,108 @@ function() {
   let syncInterval     = null;
   let fullscreenHandler = null;
 
+  window.cigAnimation = window.cigAnimation || {
+    enabled: true,
+    intensity: 'low',
+    setEnabled(on) {
+      this.enabled = on;
+      this._apply();
+    },
+    setIntensity(level) {
+      this.intensity = level;
+      this._apply();
+    },
+    _apply() {
+      const ov = document.getElementById('subtitle-overlay');
+      if (!ov) return;
+      ov.classList.toggle('cig-anim-off', !this.enabled);
+      if (this.intensity === 'low') {
+        ov.removeAttribute('data-intensity');
+      } else {
+        ov.setAttribute('data-intensity', this.intensity);
+      }
+    },
+  };
+
+  window.cigSubtitleSettings = window.cigSubtitleSettings || {
+    fontScale: 1,
+    position: 'bottom',
+    opacity: 1,
+    animationEnabled: window.cigAnimation.enabled,
+    animationIntensity: window.cigAnimation.intensity,
+    apply() {
+      const overlay = document.getElementById('subtitle-overlay');
+      if (overlay) {
+        overlay.style.opacity = String(this.opacity);
+        overlay.style.top = this.position === 'top' ? '60px' : '';
+        overlay.style.bottom = this.position === 'bottom' ? '60px' : '';
+      }
+      if (window.cigAnimation) {
+        window.cigAnimation.setEnabled(this.animationEnabled);
+        window.cigAnimation.setIntensity(this.animationIntensity);
+      }
+    },
+  };
+
+  function scaledPx(px, scale) {
+    return Math.round(px * scale) + 'px';
+  }
+
+  function bindCustomizationPanel() {
+    const settings = window.cigSubtitleSettings;
+    const scaleInput = document.getElementById('cig-font-scale');
+    const scaleValue = document.getElementById('cig-font-scale-value');
+    const positionInputs = document.querySelectorAll('input[name="cig-subtitle-position"]');
+    const animationToggle = document.getElementById('cig-animation-enabled');
+    const animationIntensity = document.getElementById('cig-animation-intensity');
+    const opacityInput = document.getElementById('cig-subtitle-opacity');
+    const opacityValue = document.getElementById('cig-subtitle-opacity-value');
+
+    if (!scaleInput || scaleInput.dataset.bound === 'true') return;
+    scaleInput.dataset.bound = 'true';
+
+    function syncControls() {
+      scaleInput.value = String(settings.fontScale);
+      scaleValue.textContent = Math.round(settings.fontScale * 100) + '%';
+      positionInputs.forEach(input => {
+        input.checked = input.value === settings.position;
+      });
+      animationToggle.checked = settings.animationEnabled;
+      animationIntensity.value = settings.animationIntensity;
+      opacityInput.value = String(settings.opacity);
+      opacityValue.textContent = Math.round(settings.opacity * 100) + '%';
+      settings.apply();
+    }
+
+    scaleInput.addEventListener('input', () => {
+      settings.fontScale = parseFloat(scaleInput.value) || 1;
+      scaleValue.textContent = Math.round(settings.fontScale * 100) + '%';
+    });
+    positionInputs.forEach(input => {
+      input.addEventListener('change', () => {
+        if (input.checked) {
+          settings.position = input.value;
+          settings.apply();
+        }
+      });
+    });
+    animationToggle.addEventListener('change', () => {
+      settings.animationEnabled = animationToggle.checked;
+      settings.apply();
+    });
+    animationIntensity.addEventListener('change', () => {
+      settings.animationIntensity = animationIntensity.value;
+      settings.apply();
+    });
+    opacityInput.addEventListener('input', () => {
+      settings.opacity = parseFloat(opacityInput.value) || 1;
+      opacityValue.textContent = Math.round(settings.opacity * 100) + '%';
+      settings.apply();
+    });
+
+    syncControls();
+  }
+
   function initSubtitles() {
     if (initialized) return;
 
@@ -50,24 +152,31 @@ function() {
     const speakerColorMap = {};
     speakers.forEach((sp, i) => { speakerColorMap[sp] = SPEAKER_COLORS[i % 6]; });
 
+    const EMOTION_CLASS = {
+      joy: 'cig-emotion-joy',
+      sadness: 'cig-emotion-sadness',
+      anger: 'cig-emotion-anger',
+      neutral: '',
+    };
+
     const VOLUME_STYLE_NORMAL = {
-      1: {fontSize:'16px', fontWeight:'400'},
-      2: {fontSize:'20px', fontWeight:'500'},
-      3: {fontSize:'26px', fontWeight:'600'},
-      4: {fontSize:'32px', fontWeight:'700'},
-      5: {fontSize:'40px', fontWeight:'900'},
+      1: {fontSize:16, fontWeight:'400'},
+      2: {fontSize:20, fontWeight:'500'},
+      3: {fontSize:26, fontWeight:'600'},
+      4: {fontSize:32, fontWeight:'700'},
+      5: {fontSize:40, fontWeight:'900'},
     };
 
     const VOLUME_STYLE_FULLSCREEN = {
-      1: {fontSize:'24px', fontWeight:'400'},
-      2: {fontSize:'30px', fontWeight:'500'},
-      3: {fontSize:'38px', fontWeight:'600'},
-      4: {fontSize:'46px', fontWeight:'700'},
-      5: {fontSize:'56px', fontWeight:'900'},
+      1: {fontSize:24, fontWeight:'400'},
+      2: {fontSize:30, fontWeight:'500'},
+      3: {fontSize:38, fontWeight:'600'},
+      4: {fontSize:46, fontWeight:'700'},
+      5: {fontSize:56, fontWeight:'900'},
     };
 
     let VOLUME_STYLE  = VOLUME_STYLE_NORMAL;
-    let BASE_FONT_SIZE = '16px';
+    let BASE_FONT_SIZE = 16;
 
     let lastSentenceId = -1;
 
@@ -89,12 +198,16 @@ function() {
         const color = speakerColorMap[currentSentence.speaker] || '#FFFFFF';
         let html = '';
         for (const word of currentSentence.words) {
+          const emoClass = EMOTION_CLASS[word.emotion] || '';
           html += '<span'
-               + ' data-start="' + word.timestamp_start + '"'
-               + ' data-end="'   + word.timestamp_end   + '"'
-               + ' data-volume="' + word.volume_level   + '"'
+               + (emoClass ? ' class="' + emoClass + '"' : '')
+               + ' data-start="'   + word.timestamp_start        + '"'
+               + ' data-end="'     + word.timestamp_end          + '"'
+               + ' data-volume="'  + word.volume_level           + '"'
+               + ' data-emotion="' + (word.emotion || 'neutral') + '"'
                + ' style="display:inline-block; margin:0 4px; color:' + color
-               + '; font-size:' + BASE_FONT_SIZE + '; font-weight:400; opacity:0.6;'
+               + '; font-size:' + scaledPx(BASE_FONT_SIZE, window.cigSubtitleSettings.fontScale)
+               + '; font-weight:400; opacity:0.6;'
                + ' transition:font-size 0.08s ease, opacity 0.08s ease;">'
                + word.word + '</span>';
         }
@@ -105,17 +218,21 @@ function() {
         const s   = parseFloat(span.dataset.start);
         const e   = parseFloat(span.dataset.end);
         const vol = parseInt(span.dataset.volume) || 3;
-        if (t >= s && t <= e) {
+        if (t >= s && t <= e && window.cigSubtitleSettings.animationEnabled) {
           const st = VOLUME_STYLE[vol] || VOLUME_STYLE[3];
-          span.style.fontSize   = st.fontSize;
+          span.style.fontSize   = scaledPx(st.fontSize, window.cigSubtitleSettings.fontScale);
           span.style.fontWeight = st.fontWeight;
           span.style.opacity    = '1.0';
         } else {
-          span.style.fontSize = BASE_FONT_SIZE; span.style.fontWeight = '400'; span.style.opacity = '0.6';
+          span.style.fontSize = scaledPx(BASE_FONT_SIZE, window.cigSubtitleSettings.fontScale);
+          span.style.fontWeight = '400';
+          span.style.opacity = '0.6';
         }
       });
     }
 
+    bindCustomizationPanel();
+    window.cigSubtitleSettings.apply();
     syncInterval = setInterval(syncSubtitles, 100);
 
     // 전체화면 토글 헬퍼
@@ -138,22 +255,27 @@ function() {
       document.removeEventListener('fullscreenchange', fullscreenHandler);
     }
     fullscreenHandler = () => {
+      const settingsPanel = document.getElementById('cig-settings-panel');
       if (document.fullscreenElement === container) {
         video.style.height    = '100vh';
         video.style.maxHeight = '100vh';
+        if (settingsPanel) { settingsPanel.style.display = 'none'; }
         VOLUME_STYLE   = VOLUME_STYLE_FULLSCREEN;
-        BASE_FONT_SIZE = '24px';
+        BASE_FONT_SIZE = 24;
       } else {
         video.style.height    = '';
         video.style.maxHeight = '500px';
+        if (settingsPanel) { settingsPanel.style.display = ''; }
         VOLUME_STYLE   = VOLUME_STYLE_NORMAL;
-        BASE_FONT_SIZE = '16px';
+        BASE_FONT_SIZE = 16;
       }
       // 스타일 전환 즉시 반영 — 현재 문장 span 강제 재생성
       lastSentenceId = -1;
+      window.cigSubtitleSettings.apply();
     };
     document.addEventListener('fullscreenchange', fullscreenHandler);
 
+    window.cigAnimation._apply();
     console.log('CIG 자막 초기화 완료:', CIG_DATA.length, '개 문장');
   }
 
@@ -194,13 +316,85 @@ def generate_subtitle_html(result: list[dict], filename: str) -> str:
         '<link href="https://fonts.googleapis.com/css2?family=Roboto+Flex'
         ':opsz,wght@8..144,100..900&display=swap" rel="stylesheet">'
         '<style>'
+        '.cig-player-shell { display:flex; gap:16px; align-items:flex-start; width:100%; }'
+        '.cig-player-main { flex:1 1 auto; min-width:0; }'
         '#cig-container { position:relative; width:100%; background:#000; }'
         '#cig-container:fullscreen #subtitle-overlay,'
         '#cig-container:-webkit-full-screen #subtitle-overlay,'
         '#cig-container:-moz-full-screen #subtitle-overlay {'
         '  position:fixed; bottom:60px; z-index:999999;'
         '}'
+        '.cig-player-shell:fullscreen .cig-settings-panel,'
+        '.cig-player-shell:-webkit-full-screen .cig-settings-panel,'
+        '.cig-player-shell:-moz-full-screen .cig-settings-panel{display:none!important;}'
+        '#subtitle-overlay{'
+        '--cig-joy-bright:1.22;--cig-joy-bounce:5px;--cig-joy-dur:1.8s;'
+        '--cig-sad-sat:0.42;--cig-sad-dur:3.4s;'
+        '--cig-anger-shake:3px;--cig-anger-dur:0.55s}'
+        '#subtitle-overlay[data-intensity="medium"]{'
+        '--cig-joy-bright:1.30;--cig-joy-bounce:8px;--cig-joy-dur:1.35s;'
+        '--cig-sad-sat:0.28;--cig-sad-dur:2.7s;'
+        '--cig-anger-shake:5px;--cig-anger-dur:0.38s}'
+        '#subtitle-overlay[data-intensity="high"]{'
+        '--cig-joy-bright:1.40;--cig-joy-bounce:12px;--cig-joy-dur:1.0s;'
+        '--cig-sad-sat:0.15;--cig-sad-dur:2.0s;'
+        '--cig-anger-shake:8px;--cig-anger-dur:0.25s}'
+        '#subtitle-overlay.cig-anim-off span{'
+        'animation:none!important;filter:none!important;transform:none!important}'
+        '@keyframes cig-joy-bounce{'
+        '0%,100%{transform:translateY(0)}'
+        '40%{transform:translateY(calc(-1*var(--cig-joy-bounce)))}'
+        '70%{transform:translateY(calc(-0.4*var(--cig-joy-bounce)))}}'
+        '@keyframes cig-sad-fade{'
+        '0%,100%{filter:saturate(var(--cig-sad-sat)) brightness(1)}'
+        '50%{filter:saturate(var(--cig-sad-sat)) brightness(0.82)}}'
+        '@keyframes cig-anger-shake{'
+        '0%,100%{transform:translateX(0)}'
+        '25%{transform:translateX(calc(-1*var(--cig-anger-shake)))}'
+        '75%{transform:translateX(var(--cig-anger-shake))}}'
+        '.cig-emotion-joy{'
+        'animation:cig-joy-bounce var(--cig-joy-dur) ease-in-out infinite;'
+        'filter:brightness(var(--cig-joy-bright))}'
+        '.cig-emotion-sadness{'
+        'animation:cig-sad-fade var(--cig-sad-dur) ease-in-out infinite}'
+        '.cig-emotion-anger{'
+        'animation:cig-anger-shake var(--cig-anger-dur) ease-in-out infinite}'
+        '.cig-settings-panel{'
+        'flex:0 0 260px; border:1px solid #d7dbe3; border-radius:8px;'
+        'background:#f8fafc; color:#111827; padding:14px;'
+        "font-family:'Roboto Flex', sans-serif; box-sizing:border-box;}"
+        '.cig-settings-panel,.cig-settings-panel h3,.cig-settings-panel label,'
+        '.cig-settings-panel legend,.cig-settings-panel span,'
+        '.cig-settings-panel select,.cig-settings-panel option{color:#111827!important;}'
+        '.cig-settings-panel h3{margin:0 0 12px; font-size:16px; font-weight:700;}'
+        '.cig-control{margin-bottom:14px;}'
+        '.cig-control label,.cig-control legend{'
+        'display:block; margin-bottom:6px; font-size:13px; font-weight:650;}'
+        '.cig-control-row{display:flex; align-items:center; justify-content:space-between; gap:10px;}'
+        '.cig-control input[type="range"]{width:100%;}'
+        '.cig-value{font-size:12px; color:#475569; min-width:44px; text-align:right;}'
+        '.cig-segment{display:flex; border:1px solid #cbd5e1; border-radius:6px; overflow:hidden;}'
+        '.cig-segment label{flex:1; margin:0; padding:7px 8px; text-align:center; cursor:pointer;}'
+        '.cig-segment input{position:absolute; opacity:0; pointer-events:none;}'
+        '.cig-segment label:has(input:checked){background:#1f2937; color:#fff!important;}'
+        '.cig-segment label:has(input:checked) span{color:#fff!important;}'
+        '.cig-control select{background:#fff!important;}'
+        '.cig-toggle{display:flex!important; align-items:center; justify-content:space-between; gap:12px;}'
+        '.cig-toggle input{'
+        'appearance:none; -webkit-appearance:none; width:18px; height:18px;'
+        'border:2px solid #111827; border-radius:4px; background:#fff;'
+        'cursor:pointer; box-sizing:border-box; position:relative;}'
+        '.cig-toggle input:checked{background:#f97316; border-color:#f97316;}'
+        '.cig-toggle input:checked::after{'
+        'content:""; position:absolute; left:4px; top:1px; width:5px; height:9px;'
+        'border:solid #fff; border-width:0 2px 2px 0; transform:rotate(45deg);}'
+        '.cig-control select{width:100%; padding:7px 8px; border:1px solid #cbd5e1; border-radius:6px;}'
+        '@media(prefers-reduced-motion:reduce){'
+        '#subtitle-overlay span{animation:none!important}}'
+        '@media(max-width: 900px){.cig-player-shell{flex-direction:column}.cig-settings-panel{width:100%; flex-basis:auto}}'
         '</style>'
+        '<div class="cig-player-shell">'
+        '<div class="cig-player-main">'
         '<div id="cig-container">'
         '<video id="cig-video"'
         ' src="/gradio_api/file=data/samples/' + filename + '"'
@@ -222,6 +416,46 @@ def generate_subtitle_html(result: list[dict], filename: str) -> str:
         "<div id=\"cig-data\" data-json='"
         + json_data_escaped
         + "' style=\"display:none;\"></div>"
+        '</div>'
+        '</div>'
+        '<aside id="cig-settings-panel" class="cig-settings-panel">'
+        '<h3>자막 설정</h3>'
+        '<div class="cig-control">'
+        '<label for="cig-font-scale">폰트 크기 기준값</label>'
+        '<div class="cig-control-row">'
+        '<input id="cig-font-scale" type="range" min="0.75" max="1.5" step="0.05" value="1">'
+        '<span id="cig-font-scale-value" class="cig-value">100%</span>'
+        '</div>'
+        '</div>'
+        '<fieldset class="cig-control" style="border:0; padding:0;">'
+        '<legend>자막 위치</legend>'
+        '<div class="cig-segment">'
+        '<label><input type="radio" name="cig-subtitle-position" value="top">상단</label>'
+        '<label><input type="radio" name="cig-subtitle-position" value="bottom" checked>하단</label>'
+        '</div>'
+        '</fieldset>'
+        '<div class="cig-control">'
+        '<label class="cig-toggle" for="cig-animation-enabled">'
+        '<span>감정 애니메이션</span>'
+        '<input id="cig-animation-enabled" type="checkbox" checked>'
+        '</label>'
+        '</div>'
+        '<div class="cig-control">'
+        '<label for="cig-animation-intensity">애니메이션 강도</label>'
+        '<select id="cig-animation-intensity">'
+        '<option value="low">낮음</option>'
+        '<option value="medium">중간</option>'
+        '<option value="high">높음</option>'
+        '</select>'
+        '</div>'
+        '<div class="cig-control" style="margin-bottom:0;">'
+        '<label for="cig-subtitle-opacity">자막 투명도</label>'
+        '<div class="cig-control-row">'
+        '<input id="cig-subtitle-opacity" type="range" min="0.35" max="1" step="0.05" value="1">'
+        '<span id="cig-subtitle-opacity-value" class="cig-value">100%</span>'
+        '</div>'
+        '</div>'
+        '</aside>'
         '</div>'
     )
 
