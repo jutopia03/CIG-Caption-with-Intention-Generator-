@@ -230,12 +230,17 @@ def generate_subtitle_html(result: list[dict], filename: str) -> str:
 # Gradio 이벤트 핸들러
 # ---------------------------------------------------------------------------
 
-def process_video(video_file: object) -> tuple[str, str]:
+_LANG_MAP: dict[str, str] = {"영어": "en", "한국어": "ko"}
+
+
+def process_video(video_file: object, input_lang: str, output_lang: str) -> tuple[str, str]:
     """자막 생성 버튼 클릭 시 호출되는 핸들러.
 
     Args:
         video_file: gr.File()이 반환하는 객체.
                     Gradio 버전에 따라 str / NamedString / dict 형태.
+        input_lang: 입력 언어 라디오 값 ("영어" | "한국어")
+        output_lang: 출력 언어 라디오 값 ("영어" | "한국어")
 
     Returns:
         (player_html, status_text)
@@ -262,7 +267,7 @@ def process_video(video_file: object) -> tuple[str, str]:
 
         logger.info("UI: 파이프라인 시작 — %s", dst_path)
 
-        result = run(dst_path)
+        result = run(dst_path, input_lang=_LANG_MAP[input_lang], output_lang=_LANG_MAP[output_lang])
 
         stem        = Path(dst_path).stem
         output_path = OUTPUT_DIR / f"{stem}_result.json"
@@ -305,6 +310,17 @@ def build_ui() -> gr.Blocks:
             file_types=[".mp4", ".mkv", ".avi"],
         )
 
+        input_lang_radio = gr.Radio(
+            ["영어", "한국어"],
+            value="영어",
+            label="입력 언어",
+        )
+        output_lang_radio = gr.Radio(
+            ["영어", "한국어"],
+            value="영어",
+            label="출력 언어",
+        )
+
         generate_btn = gr.Button("자막 생성", variant="primary")
 
         status_box = gr.Textbox(
@@ -318,7 +334,7 @@ def build_ui() -> gr.Blocks:
 
         generate_btn.click(
             fn=process_video,
-            inputs=[video_file],
+            inputs=[video_file, input_lang_radio, output_lang_radio],
             outputs=[player_html, status_box],
         )
 
