@@ -30,46 +30,6 @@ function() {
   let syncInterval     = null;
   let fullscreenHandler = null;
 
-  // ── 팀원 2 연계용 애니메이션 상태 ──────────────────────────────────────
-  let animationEnabled   = true;   // on/off 토글 (기본 on)
-  let animationIntensity = 'low';  // 강도 'low' | 'high' (기본 절제형)
-
-  // 팀원 3이 카테고리 추가 시 이 맵에 항목만 추가
-  const EMOTION_ANIMATIONS = {
-    joy:     'cig-joy',
-    sadness: 'cig-sadness',
-    anger:   'cig-anger',
-    neutral: '',
-  };
-
-  // 단일 span의 감정 클래스를 현재 상태에 맞게 갱신
-  function applyEmotionClass(span) {
-    Object.values(EMOTION_ANIMATIONS).filter(c => c).forEach(c => span.classList.remove(c));
-    if (animationEnabled) {
-      const cls = EMOTION_ANIMATIONS[span.dataset.emotion] || '';
-      if (cls) span.classList.add(cls);
-    }
-  }
-
-  // 팀원 2 패널에서 호출할 setter — window에 노출
-  function setAnimationEnabled(bool) {
-    animationEnabled = bool;
-    const ov = document.getElementById('subtitle-overlay');
-    if (ov) ov.querySelectorAll('span').forEach(applyEmotionClass);
-  }
-  window.setAnimationEnabled = setAnimationEnabled;
-
-  function setAnimationIntensity(level) {
-    animationIntensity = level;
-    const ov = document.getElementById('subtitle-overlay');
-    if (ov) {
-      ov.classList.toggle('cig-intensity-low',  level === 'low');
-      ov.classList.toggle('cig-intensity-high', level === 'high');
-    }
-  }
-  window.setAnimationIntensity = setAnimationIntensity;
-  // ─────────────────────────────────────────────────────────────────────────
-
   function initSubtitles() {
     if (initialized) return;
 
@@ -80,10 +40,6 @@ function() {
     if (!dataEl || !video || !overlay) return;
 
     initialized = true;
-
-    // overlay 강도 클래스 초기화 (재초기화 시에도 현재 intensity 값으로 리셋)
-    overlay.classList.remove('cig-intensity-low', 'cig-intensity-high');
-    overlay.classList.add('cig-intensity-' + animationIntensity);
 
     if (syncInterval) { clearInterval(syncInterval); syncInterval = null; }
 
@@ -133,13 +89,10 @@ function() {
         const color = speakerColorMap[currentSentence.speaker] || '#FFFFFF';
         let html = '';
         for (const word of currentSentence.words) {
-          const emotionCls = animationEnabled ? (EMOTION_ANIMATIONS[word.emotion] || '') : '';
           html += '<span'
-               + (emotionCls ? ' class="' + emotionCls + '"' : '')
-               + ' data-start="'   + word.timestamp_start        + '"'
-               + ' data-end="'     + word.timestamp_end          + '"'
-               + ' data-volume="'  + word.volume_level           + '"'
-               + ' data-emotion="' + (word.emotion || 'neutral') + '"'
+               + ' data-start="' + word.timestamp_start + '"'
+               + ' data-end="'   + word.timestamp_end   + '"'
+               + ' data-volume="' + word.volume_level   + '"'
                + ' style="display:inline-block; margin:0 4px; color:' + color
                + '; font-size:' + BASE_FONT_SIZE + '; font-weight:400; opacity:0.6;'
                + ' transition:font-size 0.08s ease, opacity 0.08s ease;">'
@@ -241,31 +194,12 @@ def generate_subtitle_html(result: list[dict], filename: str) -> str:
         '<link href="https://fonts.googleapis.com/css2?family=Roboto+Flex'
         ':opsz,wght@8..144,100..900&display=swap" rel="stylesheet">'
         '<style>'
-        '#cig-container{position:relative;width:100%;background:#000}'
+        '#cig-container { position:relative; width:100%; background:#000; }'
         '#cig-container:fullscreen #subtitle-overlay,'
         '#cig-container:-webkit-full-screen #subtitle-overlay,'
-        '#cig-container:-moz-full-screen #subtitle-overlay{'
-        'position:fixed;bottom:60px;z-index:999999}'
-        '@keyframes cig-bounce{'
-        '0%,100%{transform:translateY(0)}'
-        '40%{transform:translateY(-3px)}'
-        '70%{transform:translateY(-1px)}}'
-        '@keyframes cig-shake{'
-        '0%,100%{transform:translateX(0)}'
-        '25%{transform:translateX(-1px)}'
-        '75%{transform:translateX(1px)}}'
-        '@keyframes cig-fade{'
-        '0%,100%{opacity:inherit}'
-        '50%{opacity:0.4}}'
-        '.cig-joy{animation:cig-bounce 2.4s ease-in-out infinite;filter:brightness(1.12)}'
-        '.cig-sadness{animation:cig-fade 4.5s ease-in-out infinite;filter:saturate(0.5)}'
-        '.cig-anger{animation:cig-shake 0.8s ease-in-out infinite}'
-        '.cig-intensity-low .cig-joy{animation-duration:3.2s;filter:brightness(1.06)}'
-        '.cig-intensity-low .cig-sadness{animation-duration:6.0s;filter:saturate(0.72)}'
-        '.cig-intensity-low .cig-anger{animation-duration:1.2s}'
-        '.cig-intensity-high .cig-joy{animation-duration:1.6s;filter:brightness(1.25)}'
-        '.cig-intensity-high .cig-sadness{animation-duration:3.0s;filter:saturate(0.3)}'
-        '.cig-intensity-high .cig-anger{animation-duration:0.5s}'
+        '#cig-container:-moz-full-screen #subtitle-overlay {'
+        '  position:fixed; bottom:60px; z-index:999999;'
+        '}'
         '</style>'
         '<div id="cig-container">'
         '<video id="cig-video"'
