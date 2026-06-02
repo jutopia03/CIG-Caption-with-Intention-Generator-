@@ -41,10 +41,12 @@ def _call_assemblyai(audio_path: Path, language_code: str):  # type: ignore[retu
     import assemblyai as aai  # 런타임 의존성 — 테스트 시 모킹 가능
 
     aai.settings.api_key = ASSEMBLYAI_API_KEY
+    # universal-3-pro 한국어 미지원으로 ko 요청 시 universal-2 사용
+    speech_models = ["universal-2"] if language_code == "ko" else ["universal-3-pro"]
     config = aai.TranscriptionConfig(
         speaker_labels=True,
         language_code=language_code,
-        speech_models=["universal-3-pro"],
+        speech_models=speech_models,
     )
     return aai.Transcriber().transcribe(str(audio_path), config)
 
