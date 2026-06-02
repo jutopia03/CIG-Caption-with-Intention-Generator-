@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "cig"
@@ -30,6 +30,10 @@ dev = [
     "ruff",
     "pre-commit",
 ]
+
+[tool.setuptools.packages.find]
+where = ["."]
+exclude = ["data*", "tests*", ".venv*"]
 
 [tool.black]
 line-length = 88
