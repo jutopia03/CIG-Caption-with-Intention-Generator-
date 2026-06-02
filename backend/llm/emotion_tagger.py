@@ -1,4 +1,4 @@
-"""Ollama LLM 감정 추론 모듈 — requests로 /api/chat 호출, 단어별 감정 태깅."""
+"""Ollama LLM 감정 추론 모듈 — rule-based 1차 필터 + LLM 2차 보완."""
 
 import itertools
 import json
@@ -18,21 +18,32 @@ SENTENCE_GAP_SEC: float = 0.8   # 이 간격 이상이면 새 문장
 SENTENCE_MAX_WORDS: int = 15    # 이 단어 수 이상이면 강제 분리
 SENTENCE_BATCH_SIZE: int = 3    # LLM에 한 번에 보낼 최대 문장 수
 
-VALID_EMOTIONS = {"joy", "sadness", "anger", "neutral"}
+VALID_EMOTIONS = {
+    "joy", "sadness", "anger", "fear", "surprise", "disgust", "contempt", "neutral"
+}
 FALLBACK_EMOTION = "neutral"
 
 logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = (
     "You are a per-word emotion tagger for movie dialogue.\n"
-    "Your ONLY job is to assign an emotion to each word.\n\n"
-    "Valid emotions: joy, sadness, anger, neutral\n\n"
+    "Your ONLY job is to assign an emotion to each listed word.\n\n"
+    "Valid emotions: joy, sadness, anger, fear, surprise, disgust, contempt, neutral\n\n"
     "Emotion guidelines:\n"
-    "- joy: happy, excited, relieved, playful expressions\n"
-    "- anger: frustrated, demanding, aggressive, commanding tone\n"
-    "- sadness: disappointed, regretful, sorrowful expressions\n"
+    "- joy: happy, excited, relieved, playful, celebratory expressions\n"
+    "- sadness: disappointed, regretful, sorrowful, grieving expressions\n"
+    "- anger: frustrated, demanding, aggressive, commanding, threatening tone\n"
+    "- fear: terrified, anxious, panicked, dreading tone\n"
+    "- surprise: shocked, astonished, disbelieving, unexpected reaction\n"
+    "- disgust: revolted, repulsed, strong rejection or disdain\n"
+    "- contempt: mocking, sarcastic, condescending, dismissive tone\n"
     "- neutral: informational, calm, matter-of-fact statements\n\n"
+    "Use the provided volume and pitch cues to inform your decision:\n"
+    "- High volume + high pitch may suggest fear, surprise, or joy\n"
+    "- High volume + low pitch may suggest contempt or disgust\n"
+    "- Low volume overall may suggest sadness or fear\n\n"
     "Return ONLY a JSON array, no markdown, no explanation.\n"
+    "Include only the words listed under 'Words to tag'.\n"
     "Format:\n"
     "[\n"
     "  {\n"
@@ -47,8 +58,36 @@ _SYSTEM_PROMPT = (
 )
 
 
+# ---------------------------------------------------------------------------
+# rule-based 1차 필터
+# ---------------------------------------------------------------------------
+
+def _rule_based_emotion(volume: int, pitch: int) -> str | None:
+    """volume/pitch 조합으로 1차 감정 분류. 명확하지 않으면 None을 반환한다.
+
+    규칙:
+    - vol >= 4 AND pitch >= 4 → anger  (크고 높음: 소리지름/분노)
+    - vol >= 4 AND pitch <= 2 → anger  (크고 낮음: 위협/명령)
+    - vol <= 2 AND pitch <= 2 → sadness (작고 낮음: 슬픔/우울)
+    - vol in [2,3] AND pitch in [2,3,4] → neutral (중간 범위: 차분한 대화)
+    """
+    if volume >= 4 and pitch >= 4:
+        return "anger"
+    if volume >= 4 and pitch <= 2:
+        return "anger"
+    if volume <= 2 and pitch <= 2:
+        return "sadness"
+    if 2 <= volume <= 3 and 2 <= pitch <= 4:
+        return "neutral"
+    return None
+
+
+# ---------------------------------------------------------------------------
+# 퍼블릭 인터페이스
+# ---------------------------------------------------------------------------
+
 def tag_emotions(word_data: list[dict]) -> list[dict]:
-    """단어 리스트를 문장으로 묶고 LLM으로 감정·화자를 태깅한다.
+    """단어 리스트를 문장으로 묶고 rule-based 1차 필터 + LLM 2차 보완으로 감정 태깅한다.
 
     Args:
         word_data: transcribe + analyze 결과
@@ -64,15 +103,34 @@ def tag_emotions(word_data: list[dict]) -> list[dict]:
     sentences = _split_into_sentences(word_data)
     logger.info("LLM 감정 추론 시작: 총 %d개 문장", len(sentences))
 
-    all_llm_results: list[dict] = []
-    for i in range(0, len(sentences), SENTENCE_BATCH_SIZE):
-        batch = sentences[i:i + SENTENCE_BATCH_SIZE]
+    # 1단계: rule-based 1차 필터 — 각 단어에 _rule_emotion 주석 추가
+    for sentence in sentences:
+        for word in sentence:
+            word["_rule_emotion"] = _rule_based_emotion(word["volume_level"], word["pitch_level"])
+
+    rule_count = sum(1 for s in sentences for w in s if w["_rule_emotion"] is not None)
+    total_words = sum(len(s) for s in sentences)
+    logger.info("rule-based 1차 필터: %d/%d 단어 분류 완료", rule_count, total_words)
+
+    # 2단계: rule로 미분류 단어가 있는 문장만 LLM 배치에 포함
+    llm_indices = [
+        i for i, s in enumerate(sentences)
+        if any(w["_rule_emotion"] is None for w in s)
+    ]
+    llm_sentences = [sentences[i] for i in llm_indices]
+
+    llm_by_orig: dict[int, dict] = {}
+    for batch_start in range(0, len(llm_sentences), SENTENCE_BATCH_SIZE):
+        batch = llm_sentences[batch_start : batch_start + SENTENCE_BATCH_SIZE]
         batch_results = _call_llm_with_retry(batch)
         for j, result in enumerate(batch_results):
-            result["sentence_id"] = i + j + 1
-        all_llm_results.extend(batch_results)
+            orig_idx = llm_indices[batch_start + j]
+            result["sentence_id"] = orig_idx + 1
+            llm_by_orig[orig_idx] = result
 
-    merged = _merge_results(sentences, all_llm_results)
+    all_llm = [llm_by_orig.get(i, {}) for i in range(len(sentences))]
+
+    merged = _merge_results(sentences, all_llm)
     logger.info("LLM 감정 추론 완료")
     return merged
 
@@ -127,16 +185,27 @@ def _call_llm_with_retry(sentences: list[list[dict]]) -> list[dict]:
 
 
 def _build_user_prompt(sentences: list[list[dict]]) -> str:
-    lines = ["Tag the emotion of every word in the following sentences:", ""]
+    """LLM 프롬프트를 생성한다. rule-based로 미분류된 단어만 포함하며 vol/pitch 정보를 함께 전달한다."""
+    lines = [
+        "Tag the emotion of only the listed words in each sentence.",
+        "volume_level: 1=very quiet … 5=very loud  |  pitch_level: 1=very low … 5=very high",
+        "",
+    ]
     for i, words in enumerate(sentences, start=1):
         text = " ".join(w["word"] for w in words)
         t_start = words[0]["timestamp_start"]
         t_end = words[-1]["timestamp_end"]
         lines.append(f"Sentence {i} ({t_start:.1f}s-{t_end:.1f}s): '{text}'")
-    lines.extend([
-        "",
-        "Return JSON array with sentence_id, text, and words (with emotion per word) for each sentence.",
-    ])
+        lines.append("Words to tag:")
+        for w in words:
+            if w.get("_rule_emotion") is None:
+                lines.append(
+                    f'  - "{w["word"]}" (volume={w["volume_level"]}, pitch={w["pitch_level"]})'
+                )
+        lines.append("")
+    lines.append(
+        "Return JSON array with sentence_id, text, and words (only tagged words with emotion) for each sentence."
+    )
     return "\n".join(lines)
 
 
@@ -176,14 +245,10 @@ def _clean_json_text(raw: str) -> str:
     2. trailing comma 제거 — llama3.2가 {"key": "val",} 형태를 종종 출력함
     3. 첫 '[' ~ 마지막 ']' 슬라이싱
     """
-    # 1. 마크다운 코드블록 제거
     text = re.sub(r"```(?:json)?\s*([\s\S]*?)```", r"\1", raw).strip()
-
-    # 2. trailing comma 제거
     text = re.sub(r",\s*}", "}", text)
     text = re.sub(r",\s*]", "]", text)
 
-    # 3. JSON 배열 범위 추출
     start = text.find("[")
     end = text.rfind("]")
     if start == -1 or end == -1:
@@ -198,30 +263,41 @@ def _parse_json_response(raw: str) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# LLM 결과와 음향 분석 결과 병합
+# LLM 결과와 rule 결과 병합
 # ---------------------------------------------------------------------------
 
 def _merge_results(
     sentences: list[list[dict]],
     llm_results: list[dict],
 ) -> list[dict]:
-    """LLM emotion·speaker·text와 음향 분석 volume/pitch를 word 단위로 병합한다."""
+    """rule emotion과 LLM emotion을 word 단위로 병합한다.
+
+    우선순위: _rule_emotion > LLM emotion (순서 매칭) > FALLBACK_EMOTION
+    """
     output: list[dict] = []
 
-    # zip_longest: LLM이 일부 문장만 반환해도 나머지를 fallback으로 채움
     for sent_idx, (word_list, llm_sent) in enumerate(
         itertools.zip_longest(sentences, llm_results, fillvalue={}), start=1
     ):
         if word_list is None:
-            continue  # sentences 쪽이 더 짧은 경우(이론상 불가)는 건너뜀
+            continue
+
+        # LLM이 반환한 단어 목록 — rule 미분류 단어와 순서 대응
         llm_words: list[dict] = llm_sent.get("words", [])
+        llm_word_idx = 0
         merged_words: list[dict] = []
 
-        for word_idx, audio_word in enumerate(word_list):
-            emotion = FALLBACK_EMOTION
-            if word_idx < len(llm_words):
-                raw_emotion = llm_words[word_idx].get("emotion", FALLBACK_EMOTION)
-                emotion = raw_emotion if raw_emotion in VALID_EMOTIONS else FALLBACK_EMOTION
+        for audio_word in word_list:
+            rule_emotion = audio_word.get("_rule_emotion")
+            if rule_emotion is not None:
+                emotion = rule_emotion
+            else:
+                if llm_word_idx < len(llm_words):
+                    raw_emotion = llm_words[llm_word_idx].get("emotion", FALLBACK_EMOTION)
+                    emotion = raw_emotion if raw_emotion in VALID_EMOTIONS else FALLBACK_EMOTION
+                    llm_word_idx += 1
+                else:
+                    emotion = FALLBACK_EMOTION
 
             merged_words.append(
                 {
