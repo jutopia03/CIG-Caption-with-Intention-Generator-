@@ -30,6 +30,31 @@ function() {
   let syncInterval     = null;
   let fullscreenHandler = null;
 
+  // ── 팀원2 연계 애니메이션 컨트롤러 ──────────────────────────────────────
+  window.cigAnimation = window.cigAnimation || {
+    enabled:   true,
+    intensity: 'low',
+    setEnabled(on) {
+      this.enabled = on;
+      this._apply();
+    },
+    setIntensity(level) {
+      this.intensity = level;
+      this._apply();
+    },
+    _apply() {
+      const ov = document.getElementById('subtitle-overlay');
+      if (!ov) return;
+      ov.classList.toggle('cig-anim-off', !this.enabled);
+      if (this.intensity === 'low') {
+        ov.removeAttribute('data-intensity');
+      } else {
+        ov.setAttribute('data-intensity', this.intensity);
+      }
+    },
+  };
+  // ─────────────────────────────────────────────────────────────────────────
+
   function initSubtitles() {
     if (initialized) return;
 
@@ -49,6 +74,14 @@ function() {
     const speakers = [...new Set(CIG_DATA.map(s => s.speaker))];
     const speakerColorMap = {};
     speakers.forEach((sp, i) => { speakerColorMap[sp] = SPEAKER_COLORS[i % 6]; });
+
+    // 팀원3 카테고리 확장 시 이 맵 + CSS 클래스 한 쌍만 추가하면 됨
+    const EMOTION_CLASS = {
+      joy:     'cig-emotion-joy',
+      sadness: 'cig-emotion-sadness',
+      anger:   'cig-emotion-anger',
+      neutral: '',
+    };
 
     const VOLUME_STYLE_NORMAL = {
       1: {fontSize:'16px', fontWeight:'400'},
@@ -89,10 +122,13 @@ function() {
         const color = speakerColorMap[currentSentence.speaker] || '#FFFFFF';
         let html = '';
         for (const word of currentSentence.words) {
+          const emoClass = EMOTION_CLASS[word.emotion] || '';
           html += '<span'
-               + ' data-start="' + word.timestamp_start + '"'
-               + ' data-end="'   + word.timestamp_end   + '"'
-               + ' data-volume="' + word.volume_level   + '"'
+               + (emoClass ? ' class="' + emoClass + '"' : '')
+               + ' data-start="'   + word.timestamp_start        + '"'
+               + ' data-end="'     + word.timestamp_end          + '"'
+               + ' data-volume="'  + word.volume_level           + '"'
+               + ' data-emotion="' + (word.emotion || 'neutral') + '"'
                + ' style="display:inline-block; margin:0 4px; color:' + color
                + '; font-size:' + BASE_FONT_SIZE + '; font-weight:400; opacity:0.6;'
                + ' transition:font-size 0.08s ease, opacity 0.08s ease;">'
@@ -154,6 +190,7 @@ function() {
     };
     document.addEventListener('fullscreenchange', fullscreenHandler);
 
+    window.cigAnimation._apply();
     console.log('CIG 자막 초기화 완료:', CIG_DATA.length, '개 문장');
   }
 
@@ -200,6 +237,40 @@ def generate_subtitle_html(result: list[dict], filename: str) -> str:
         '#cig-container:-moz-full-screen #subtitle-overlay {'
         '  position:fixed; bottom:60px; z-index:999999;'
         '}'
+        '#subtitle-overlay{'
+        '--cig-joy-bright:1.10;--cig-joy-bounce:2px;--cig-joy-dur:2.8s;'
+        '--cig-sad-sat:0.60;--cig-sad-dur:5.5s;'
+        '--cig-anger-shake:1px;--cig-anger-dur:1.0s}'
+        '#subtitle-overlay[data-intensity="medium"]{'
+        '--cig-joy-bright:1.15;--cig-joy-bounce:4px;--cig-joy-dur:2.2s;'
+        '--cig-sad-sat:0.45;--cig-sad-dur:4.0s;'
+        '--cig-anger-shake:2px;--cig-anger-dur:0.7s}'
+        '#subtitle-overlay[data-intensity="high"]{'
+        '--cig-joy-bright:1.25;--cig-joy-bounce:6px;--cig-joy-dur:1.6s;'
+        '--cig-sad-sat:0.30;--cig-sad-dur:3.0s;'
+        '--cig-anger-shake:3px;--cig-anger-dur:0.5s}'
+        '#subtitle-overlay.cig-anim-off span{'
+        'animation:none!important;filter:none!important;transform:none!important}'
+        '@keyframes cig-joy-bounce{'
+        '0%,100%{transform:translateY(0)}'
+        '40%{transform:translateY(calc(-1*var(--cig-joy-bounce)))}'
+        '70%{transform:translateY(calc(-0.4*var(--cig-joy-bounce)))}}'
+        '@keyframes cig-sad-fade{'
+        '0%,100%{filter:saturate(var(--cig-sad-sat)) brightness(1)}'
+        '50%{filter:saturate(var(--cig-sad-sat)) brightness(0.82)}}'
+        '@keyframes cig-anger-shake{'
+        '0%,100%{transform:translateX(0)}'
+        '25%{transform:translateX(calc(-1*var(--cig-anger-shake)))}'
+        '75%{transform:translateX(var(--cig-anger-shake))}}'
+        '.cig-emotion-joy{'
+        'animation:cig-joy-bounce var(--cig-joy-dur) ease-in-out infinite;'
+        'filter:brightness(var(--cig-joy-bright))}'
+        '.cig-emotion-sadness{'
+        'animation:cig-sad-fade var(--cig-sad-dur) ease-in-out infinite}'
+        '.cig-emotion-anger{'
+        'animation:cig-anger-shake var(--cig-anger-dur) ease-in-out infinite}'
+        '@media(prefers-reduced-motion:reduce){'
+        '#subtitle-overlay span{animation:none!important}}'
         '</style>'
         '<div id="cig-container">'
         '<video id="cig-video"'
