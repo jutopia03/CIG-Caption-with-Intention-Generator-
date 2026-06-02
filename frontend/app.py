@@ -77,10 +77,14 @@ function() {
 
     // 팀원3 카테고리 확장 시 이 맵 + CSS 클래스 한 쌍만 추가하면 됨
     const EMOTION_CLASS = {
-      joy:     'cig-emotion-joy',
-      sadness: 'cig-emotion-sadness',
-      anger:   'cig-emotion-anger',
-      neutral: '',
+      joy:      'cig-emotion-joy',
+      sadness:  'cig-emotion-sadness',
+      anger:    'cig-emotion-anger',
+      fear:     'cig-emotion-fear',
+      surprise: 'cig-emotion-surprise',
+      disgust:  'cig-emotion-disgust',
+      contempt: 'cig-emotion-contempt',
+      neutral:  '',
     };
 
     const VOLUME_STYLE_NORMAL = {
@@ -122,9 +126,7 @@ function() {
         const color = speakerColorMap[currentSentence.speaker] || '#FFFFFF';
         let html = '';
         for (const word of currentSentence.words) {
-          const emoClass = EMOTION_CLASS[word.emotion] || '';
           html += '<span'
-               + (emoClass ? ' class="' + emoClass + '"' : '')
                + ' data-start="'   + word.timestamp_start        + '"'
                + ' data-end="'     + word.timestamp_end          + '"'
                + ' data-volume="'  + word.volume_level           + '"'
@@ -141,13 +143,16 @@ function() {
         const s   = parseFloat(span.dataset.start);
         const e   = parseFloat(span.dataset.end);
         const vol = parseInt(span.dataset.volume) || 3;
+        const emoClass = EMOTION_CLASS[span.dataset.emotion] || '';
         if (t >= s && t <= e) {
           const st = VOLUME_STYLE[vol] || VOLUME_STYLE[3];
           span.style.fontSize   = st.fontSize;
           span.style.fontWeight = st.fontWeight;
           span.style.opacity    = '1.0';
+          if (emoClass) span.classList.add(emoClass);
         } else {
           span.style.fontSize = BASE_FONT_SIZE; span.style.fontWeight = '400'; span.style.opacity = '0.6';
+          if (emoClass) span.classList.remove(emoClass);
         }
       });
     }
@@ -238,17 +243,29 @@ def generate_subtitle_html(result: list[dict], filename: str) -> str:
         '  position:fixed; bottom:60px; z-index:999999;'
         '}'
         '#subtitle-overlay{'
-        '--cig-joy-bright:1.10;--cig-joy-bounce:2px;--cig-joy-dur:2.8s;'
-        '--cig-sad-sat:0.60;--cig-sad-dur:5.5s;'
-        '--cig-anger-shake:1px;--cig-anger-dur:1.0s}'
+        '--cig-joy-bright:1.10;--cig-joy-bounce:2px;--cig-joy-dur:0.5s;'
+        '--cig-sad-sat:0.60;--cig-sad-dur:0.9s;'
+        '--cig-anger-shake:1px;--cig-anger-dur:0.18s;'
+        '--cig-fear-amp:0.8px;--cig-fear-dur:0.12s;'
+        '--cig-surprise-scale:1.15;--cig-surprise-dur:0.35s;'
+        '--cig-disgust-skew:3deg;--cig-disgust-sat:0.55;--cig-disgust-dur:0.5s;'
+        '--cig-contempt-rot:3deg;--cig-contempt-dur:0.6s}'
         '#subtitle-overlay[data-intensity="medium"]{'
-        '--cig-joy-bright:1.15;--cig-joy-bounce:4px;--cig-joy-dur:2.2s;'
-        '--cig-sad-sat:0.45;--cig-sad-dur:4.0s;'
-        '--cig-anger-shake:2px;--cig-anger-dur:0.7s}'
+        '--cig-joy-bright:1.15;--cig-joy-bounce:4px;--cig-joy-dur:0.45s;'
+        '--cig-sad-sat:0.45;--cig-sad-dur:0.75s;'
+        '--cig-anger-shake:2px;--cig-anger-dur:0.15s;'
+        '--cig-fear-amp:1.2px;--cig-fear-dur:0.10s;'
+        '--cig-surprise-scale:1.20;--cig-surprise-dur:0.30s;'
+        '--cig-disgust-skew:5deg;--cig-disgust-sat:0.45;--cig-disgust-dur:0.45s;'
+        '--cig-contempt-rot:4deg;--cig-contempt-dur:0.5s}'
         '#subtitle-overlay[data-intensity="high"]{'
-        '--cig-joy-bright:1.25;--cig-joy-bounce:6px;--cig-joy-dur:1.6s;'
-        '--cig-sad-sat:0.30;--cig-sad-dur:3.0s;'
-        '--cig-anger-shake:3px;--cig-anger-dur:0.5s}'
+        '--cig-joy-bright:1.25;--cig-joy-bounce:6px;--cig-joy-dur:0.4s;'
+        '--cig-sad-sat:0.30;--cig-sad-dur:0.6s;'
+        '--cig-anger-shake:3px;--cig-anger-dur:0.12s;'
+        '--cig-fear-amp:1.8px;--cig-fear-dur:0.08s;'
+        '--cig-surprise-scale:1.28;--cig-surprise-dur:0.25s;'
+        '--cig-disgust-skew:7deg;--cig-disgust-sat:0.35;--cig-disgust-dur:0.4s;'
+        '--cig-contempt-rot:5deg;--cig-contempt-dur:0.4s}'
         '#subtitle-overlay.cig-anim-off span{'
         'animation:none!important;filter:none!important;transform:none!important}'
         '@keyframes cig-joy-bounce{'
@@ -266,9 +283,35 @@ def generate_subtitle_html(result: list[dict], filename: str) -> str:
         'animation:cig-joy-bounce var(--cig-joy-dur) ease-in-out infinite;'
         'filter:brightness(var(--cig-joy-bright))}'
         '.cig-emotion-sadness{'
+        'filter:saturate(var(--cig-sad-sat));'
         'animation:cig-sad-fade var(--cig-sad-dur) ease-in-out infinite}'
         '.cig-emotion-anger{'
         'animation:cig-anger-shake var(--cig-anger-dur) ease-in-out infinite}'
+        '@keyframes cig-fear-tremble{'
+        '0%,100%{transform:translate(0,0)}'
+        '25%{transform:translate(calc(-1*var(--cig-fear-amp)),calc(0.5*var(--cig-fear-amp)))}'
+        '75%{transform:translate(var(--cig-fear-amp),calc(-0.5*var(--cig-fear-amp)))}}'
+        '@keyframes cig-surprise-pop{'
+        '0%{transform:scale(1)}'
+        '30%{transform:scale(var(--cig-surprise-scale))}'
+        '60%{transform:scale(0.97)}'
+        '100%{transform:scale(1)}}'
+        '@keyframes cig-disgust-skew{'
+        '0%,100%{transform:skewX(0deg)}'
+        '30%{transform:skewX(calc(-1*var(--cig-disgust-skew)))}'
+        '70%{transform:skewX(var(--cig-disgust-skew))}}'
+        '@keyframes cig-contempt-tilt{'
+        '0%,100%{transform:rotate(0deg)}'
+        '50%{transform:rotate(var(--cig-contempt-rot))}}'
+        '.cig-emotion-fear{'
+        'animation:cig-fear-tremble var(--cig-fear-dur) linear infinite}'
+        '.cig-emotion-surprise{'
+        'animation:cig-surprise-pop var(--cig-surprise-dur) ease-out forwards}'
+        '.cig-emotion-disgust{'
+        'filter:saturate(var(--cig-disgust-sat));'
+        'animation:cig-disgust-skew var(--cig-disgust-dur) ease-in-out infinite}'
+        '.cig-emotion-contempt{'
+        'animation:cig-contempt-tilt var(--cig-contempt-dur) ease-in-out infinite}'
         '@media(prefers-reduced-motion:reduce){'
         '#subtitle-overlay span{animation:none!important}}'
         '</style>'
