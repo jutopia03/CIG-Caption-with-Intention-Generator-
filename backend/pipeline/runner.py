@@ -35,8 +35,8 @@ class PipelineStep:
 
 
 PIPELINE_STEPS: list[PipelineStep] = [
-    PipelineStep("ffmpeg", 10, "ffmepeg 완료"),
-    PipelineStep("assemblyai", 30, "Assemblyai 완료"),
+    PipelineStep("ffmpeg", 10, "ffmpeg 완료"),
+    PipelineStep("assemblyai", 30, "AssemblyAI 완료"),
     PipelineStep("librosa", 50, "librosa 완료"),
     PipelineStep("llm", 70, "LLM 완료"),
     PipelineStep("pydantic", 90, "Pydantic 완료"),
