@@ -153,10 +153,14 @@ function() {
     speakers.forEach((sp, i) => { speakerColorMap[sp] = SPEAKER_COLORS[i % 6]; });
 
     const EMOTION_CLASS = {
-      joy: 'cig-emotion-joy',
-      sadness: 'cig-emotion-sadness',
-      anger: 'cig-emotion-anger',
-      neutral: '',
+      joy:      'cig-emotion-joy',
+      sadness:  'cig-emotion-sadness',
+      anger:    'cig-emotion-anger',
+      fear:     'cig-emotion-fear',
+      surprise: 'cig-emotion-surprise',
+      disgust:  'cig-emotion-disgust',
+      contempt: 'cig-emotion-contempt',
+      neutral:  '',
     };
 
     const VOLUME_STYLE_NORMAL = {
@@ -227,6 +231,14 @@ function() {
           span.style.fontSize = scaledPx(BASE_FONT_SIZE, window.cigSubtitleSettings.fontScale);
           span.style.fontWeight = '400';
           span.style.opacity = '0.6';
+        }
+        const emoClass = EMOTION_CLASS[span.dataset.emotion] || '';
+        if (emoClass) {
+          if (window.cigAnimation.enabled) {
+            span.classList.add(emoClass);
+          } else {
+            span.classList.remove(emoClass);
+          }
         }
       });
     }
@@ -330,15 +342,27 @@ def generate_subtitle_html(result: list[dict], filename: str) -> str:
         '#subtitle-overlay{'
         '--cig-joy-bright:1.22;--cig-joy-bounce:5px;--cig-joy-dur:1.8s;'
         '--cig-sad-sat:0.42;--cig-sad-dur:3.4s;'
-        '--cig-anger-shake:3px;--cig-anger-dur:0.55s}'
+        '--cig-anger-shake:3px;--cig-anger-dur:0.55s;'
+        '--cig-fear-amp:0.8px;--cig-fear-dur:0.12s;'
+        '--cig-surprise-scale:1.15;--cig-surprise-dur:0.35s;'
+        '--cig-disgust-skew:3deg;--cig-disgust-sat:0.55;--cig-disgust-dur:0.5s;'
+        '--cig-contempt-rot:3deg;--cig-contempt-dur:0.6s}'
         '#subtitle-overlay[data-intensity="medium"]{'
         '--cig-joy-bright:1.30;--cig-joy-bounce:8px;--cig-joy-dur:1.35s;'
         '--cig-sad-sat:0.28;--cig-sad-dur:2.7s;'
-        '--cig-anger-shake:5px;--cig-anger-dur:0.38s}'
+        '--cig-anger-shake:5px;--cig-anger-dur:0.38s;'
+        '--cig-fear-amp:1.2px;--cig-fear-dur:0.10s;'
+        '--cig-surprise-scale:1.20;--cig-surprise-dur:0.30s;'
+        '--cig-disgust-skew:5deg;--cig-disgust-sat:0.45;--cig-disgust-dur:0.45s;'
+        '--cig-contempt-rot:4deg;--cig-contempt-dur:0.5s}'
         '#subtitle-overlay[data-intensity="high"]{'
         '--cig-joy-bright:1.40;--cig-joy-bounce:12px;--cig-joy-dur:1.0s;'
         '--cig-sad-sat:0.15;--cig-sad-dur:2.0s;'
-        '--cig-anger-shake:8px;--cig-anger-dur:0.25s}'
+        '--cig-anger-shake:8px;--cig-anger-dur:0.25s;'
+        '--cig-fear-amp:1.8px;--cig-fear-dur:0.08s;'
+        '--cig-surprise-scale:1.28;--cig-surprise-dur:0.25s;'
+        '--cig-disgust-skew:7deg;--cig-disgust-sat:0.35;--cig-disgust-dur:0.4s;'
+        '--cig-contempt-rot:5deg;--cig-contempt-dur:0.4s}'
         '#subtitle-overlay.cig-anim-off span{'
         'animation:none!important;filter:none!important;transform:none!important}'
         '@keyframes cig-joy-bounce{'
@@ -359,6 +383,31 @@ def generate_subtitle_html(result: list[dict], filename: str) -> str:
         'animation:cig-sad-fade var(--cig-sad-dur) ease-in-out infinite}'
         '.cig-emotion-anger{'
         'animation:cig-anger-shake var(--cig-anger-dur) ease-in-out infinite}'
+        '@keyframes cig-fear-tremble{'
+        '0%,100%{transform:translate(0,0)}'
+        '25%{transform:translate(calc(-1*var(--cig-fear-amp)),calc(0.5*var(--cig-fear-amp)))}'
+        '75%{transform:translate(var(--cig-fear-amp),calc(-0.5*var(--cig-fear-amp)))}}'
+        '@keyframes cig-surprise-pop{'
+        '0%{transform:scale(1)}'
+        '30%{transform:scale(var(--cig-surprise-scale))}'
+        '60%{transform:scale(0.97)}'
+        '100%{transform:scale(1)}}'
+        '@keyframes cig-disgust-skew{'
+        '0%,100%{transform:skewX(0deg)}'
+        '30%{transform:skewX(calc(-1*var(--cig-disgust-skew)))}'
+        '70%{transform:skewX(var(--cig-disgust-skew))}}'
+        '@keyframes cig-contempt-tilt{'
+        '0%,100%{transform:rotate(0deg)}'
+        '50%{transform:rotate(var(--cig-contempt-rot))}}'
+        '.cig-emotion-fear{'
+        'animation:cig-fear-tremble var(--cig-fear-dur) linear infinite}'
+        '.cig-emotion-surprise{'
+        'animation:cig-surprise-pop var(--cig-surprise-dur) ease-out forwards/* 의도적 1회 실행: 놀람은 순간적 반응 */}'
+        '.cig-emotion-disgust{'
+        'filter:saturate(var(--cig-disgust-sat));'
+        'animation:cig-disgust-skew var(--cig-disgust-dur) ease-in-out infinite}'
+        '.cig-emotion-contempt{'
+        'animation:cig-contempt-tilt var(--cig-contempt-dur) ease-in-out infinite}'
         '.cig-settings-panel{'
         'flex:0 0 260px; border:1px solid #d7dbe3; border-radius:8px;'
         'background:#f8fafc; color:#111827; padding:14px;'
