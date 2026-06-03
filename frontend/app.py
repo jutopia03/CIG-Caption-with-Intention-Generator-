@@ -222,6 +222,7 @@ function() {
         const s   = parseFloat(span.dataset.start);
         const e   = parseFloat(span.dataset.end);
         const vol = parseInt(span.dataset.volume) || 3;
+        const emoClass = EMOTION_CLASS[span.dataset.emotion] || '';
         if (t >= s && t <= e) {
           const st = VOLUME_STYLE[vol] || VOLUME_STYLE[3];
           span.style.fontSize   = scaledPx(st.fontSize, window.cigSubtitleSettings.fontScale);
@@ -232,7 +233,6 @@ function() {
           span.style.fontWeight = '400';
           span.style.opacity = '0.6';
         }
-        const emoClass = EMOTION_CLASS[span.dataset.emotion] || '';
         if (emoClass) {
           if (window.cigAnimation.enabled) {
             span.classList.add(emoClass);

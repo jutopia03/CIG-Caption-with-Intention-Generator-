@@ -9,7 +9,7 @@ class Word(BaseModel):
     word: str
     timestamp_start: float
     timestamp_end: float
-    emotion: Literal["joy", "sadness", "anger", "neutral"]
+    emotion: Literal["joy", "sadness", "anger", "fear", "surprise", "disgust", "contempt", "neutral"]
     volume_level: int = Field(..., ge=1, le=5)
     pitch_level: int = Field(..., ge=1, le=5)
 
