@@ -149,7 +149,13 @@ function() {
           span.style.fontSize   = st.fontSize;
           span.style.fontWeight = st.fontWeight;
           span.style.opacity    = '1.0';
-          if (emoClass) span.classList.add(emoClass);
+          if (emoClass) {
+            if (window.cigAnimation.enabled) {
+              span.classList.add(emoClass);
+            } else {
+              span.classList.remove(emoClass);
+            }
+          }
         } else {
           span.style.fontSize = BASE_FONT_SIZE; span.style.fontWeight = '400'; span.style.opacity = '0.6';
           if (emoClass) span.classList.remove(emoClass);
@@ -306,7 +312,7 @@ def generate_subtitle_html(result: list[dict], filename: str) -> str:
         '.cig-emotion-fear{'
         'animation:cig-fear-tremble var(--cig-fear-dur) linear infinite}'
         '.cig-emotion-surprise{'
-        'animation:cig-surprise-pop var(--cig-surprise-dur) ease-out forwards}'
+        'animation:cig-surprise-pop var(--cig-surprise-dur) ease-out forwards/* 의도적 1회 실행: 놀람은 순간적 반응 */}'
         '.cig-emotion-disgust{'
         'filter:saturate(var(--cig-disgust-sat));'
         'animation:cig-disgust-skew var(--cig-disgust-dur) ease-in-out infinite}'
