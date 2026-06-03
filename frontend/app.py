@@ -222,7 +222,7 @@ function() {
         const s   = parseFloat(span.dataset.start);
         const e   = parseFloat(span.dataset.end);
         const vol = parseInt(span.dataset.volume) || 3;
-        if (t >= s && t <= e && window.cigSubtitleSettings.animationEnabled) {
+        if (t >= s && t <= e) {
           const st = VOLUME_STYLE[vol] || VOLUME_STYLE[3];
           span.style.fontSize   = scaledPx(st.fontSize, window.cigSubtitleSettings.fontScale);
           span.style.fontWeight = st.fontWeight;
@@ -340,25 +340,25 @@ def generate_subtitle_html(result: list[dict], filename: str) -> str:
         '.cig-player-shell:-webkit-full-screen .cig-settings-panel,'
         '.cig-player-shell:-moz-full-screen .cig-settings-panel{display:none!important;}'
         '#subtitle-overlay{'
-        '--cig-joy-bright:1.22;--cig-joy-bounce:5px;--cig-joy-dur:1.8s;'
-        '--cig-sad-sat:0.42;--cig-sad-dur:3.4s;'
-        '--cig-anger-shake:3px;--cig-anger-dur:0.55s;'
+        '--cig-joy-bright:1.10;--cig-joy-bounce:2px;--cig-joy-dur:0.5s;'
+        '--cig-sad-sat:0.60;--cig-sad-dur:0.9s;'
+        '--cig-anger-shake:1px;--cig-anger-dur:0.18s;'
         '--cig-fear-amp:0.8px;--cig-fear-dur:0.12s;'
         '--cig-surprise-scale:1.15;--cig-surprise-dur:0.35s;'
         '--cig-disgust-skew:3deg;--cig-disgust-sat:0.55;--cig-disgust-dur:0.5s;'
         '--cig-contempt-rot:3deg;--cig-contempt-dur:0.6s}'
         '#subtitle-overlay[data-intensity="medium"]{'
-        '--cig-joy-bright:1.30;--cig-joy-bounce:8px;--cig-joy-dur:1.35s;'
-        '--cig-sad-sat:0.28;--cig-sad-dur:2.7s;'
-        '--cig-anger-shake:5px;--cig-anger-dur:0.38s;'
+        '--cig-joy-bright:1.15;--cig-joy-bounce:4px;--cig-joy-dur:0.45s;'
+        '--cig-sad-sat:0.45;--cig-sad-dur:0.75s;'
+        '--cig-anger-shake:2px;--cig-anger-dur:0.15s;'
         '--cig-fear-amp:1.2px;--cig-fear-dur:0.10s;'
         '--cig-surprise-scale:1.20;--cig-surprise-dur:0.30s;'
         '--cig-disgust-skew:5deg;--cig-disgust-sat:0.45;--cig-disgust-dur:0.45s;'
         '--cig-contempt-rot:4deg;--cig-contempt-dur:0.5s}'
         '#subtitle-overlay[data-intensity="high"]{'
-        '--cig-joy-bright:1.40;--cig-joy-bounce:12px;--cig-joy-dur:1.0s;'
-        '--cig-sad-sat:0.15;--cig-sad-dur:2.0s;'
-        '--cig-anger-shake:8px;--cig-anger-dur:0.25s;'
+        '--cig-joy-bright:1.25;--cig-joy-bounce:6px;--cig-joy-dur:0.4s;'
+        '--cig-sad-sat:0.30;--cig-sad-dur:0.6s;'
+        '--cig-anger-shake:3px;--cig-anger-dur:0.12s;'
         '--cig-fear-amp:1.8px;--cig-fear-dur:0.08s;'
         '--cig-surprise-scale:1.28;--cig-surprise-dur:0.25s;'
         '--cig-disgust-skew:7deg;--cig-disgust-sat:0.35;--cig-disgust-dur:0.4s;'
@@ -380,6 +380,7 @@ def generate_subtitle_html(result: list[dict], filename: str) -> str:
         'animation:cig-joy-bounce var(--cig-joy-dur) ease-in-out infinite;'
         'filter:brightness(var(--cig-joy-bright))}'
         '.cig-emotion-sadness{'
+        'filter:saturate(var(--cig-sad-sat));'
         'animation:cig-sad-fade var(--cig-sad-dur) ease-in-out infinite}'
         '.cig-emotion-anger{'
         'animation:cig-anger-shake var(--cig-anger-dur) ease-in-out infinite}'
