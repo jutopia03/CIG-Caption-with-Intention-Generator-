@@ -331,7 +331,7 @@ def _build_fallback(sentences: list[list[dict]]) -> list[dict]:
             "speaker":     words[0].get("speaker", "Character_A"),
             "text":        " ".join(w["word"] for w in words),
             "words":       [
-                {**w, "emotion": FALLBACK_EMOTION}
+                {**w, "emotion": w.get("_rule_emotion") or FALLBACK_EMOTION}
                 for w in words
             ],
         }

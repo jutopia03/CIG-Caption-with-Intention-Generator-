@@ -97,14 +97,18 @@ def test_tag_emotions_preserves_levels(mock_post):
 @patch("backend.llm.emotion_tagger._post_to_ollama", side_effect=ConnectionError("연결 실패"))
 def test_tag_emotions_fallback(mock_post):
     """Ollama 연결 실패 시 rule-based 단어는 rule 감정 유지, 미분류 단어는 neutral로 폴백해야 한다."""
-    from backend.llm.emotion_tagger import tag_emotions, VALID_EMOTIONS
+    from backend.llm.emotion_tagger import tag_emotions
     result = tag_emotions(_WORD_DATA)
     assert isinstance(result, list)
     assert len(result) > 0
     for sent in result:
         assert sent["speaker"] == "Character_A"
-        for word in sent["words"]:
-            assert word["emotion"] in VALID_EMOTIONS
+
+    # "this"(vol=4, pitch=4) → rule-based anger → LLM 실패해도 anger 유지
+    # "know"(vol=3, pitch=1) → rule 미분류 → neutral fallback
+    word_emotions = {w["word"]: w["emotion"] for sent in result for w in sent["words"]}
+    assert word_emotions["this"] == "anger"
+    assert word_emotions["know"] == "neutral"
 
 
 @patch("backend.llm.emotion_tagger._post_to_ollama", return_value="```json\n" + _LLM_RESPONSE + "\n```")
