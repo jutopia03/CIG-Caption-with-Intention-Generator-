@@ -32,8 +32,7 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-where = ["."]
-exclude = ["data*", "tests*", ".venv*"]
+include = ["backend*", "frontend*"]
 
 [tool.black]
 line-length = 88
