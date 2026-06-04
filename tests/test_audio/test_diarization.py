@@ -3,9 +3,12 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import numpy as np
+
 from backend.audio.diarization import (
     _assign_speakers,
     _build_label_map,
+    _cluster_embeddings,
     _parse_segment,
     _smooth_speaker_islands,
     diarize,
@@ -72,6 +75,18 @@ def test_smooth_speaker_islands_merges_short_flip() -> None:
         "Character_A",
         "Character_A",
     ]
+
+
+def test_cluster_embeddings_reuses_similar_voice_label() -> None:
+    embeddings = [
+        np.array([1.0, 0.0], dtype=np.float32),
+        np.array([0.99, 0.01], dtype=np.float32),
+        np.array([0.0, 1.0], dtype=np.float32),
+    ]
+
+    result = _cluster_embeddings(embeddings, threshold=0.72)
+
+    assert result == ["Voice_00", "Voice_00", "Voice_01"]
 
 
 def test_diarize_fallback_on_model_error(tmp_path: Path) -> None:

@@ -2,9 +2,11 @@
 
 import logging
 import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -19,6 +21,12 @@ SORTFORMER_MODEL_PATH: str = os.getenv("SORTFORMER_MODEL_PATH", "")
 SORTFORMER_BATCH_SIZE: int = int(os.getenv("SORTFORMER_BATCH_SIZE", "1"))
 SPEAKER_SMOOTH_MAX_SEC: float = float(os.getenv("SPEAKER_SMOOTH_MAX_SEC", "1.2"))
 SPEAKER_SMOOTH_MAX_WORDS: int = int(os.getenv("SPEAKER_SMOOTH_MAX_WORDS", "3"))
+SPEAKER_REID_ENABLED: bool = os.getenv("SPEAKER_REID_ENABLED", "true").lower() == "true"
+SPEAKER_EMBEDDING_MODEL: str = os.getenv("SPEAKER_EMBEDDING_MODEL", "titanet_large")
+SPEAKER_EMBEDDING_THRESHOLD: float = float(
+    os.getenv("SPEAKER_EMBEDDING_THRESHOLD", "0.72")
+)
+SPEAKER_EMBEDDING_MIN_SEC: float = float(os.getenv("SPEAKER_EMBEDDING_MIN_SEC", "0.7"))
 _LABEL_PREFIX = "Character_"
 
 
@@ -32,6 +40,7 @@ def diarize(audio_path: str | Path, word_timestamps: list[dict]) -> list[dict]:
 
     try:
         segments = _run_diarization(audio_path)
+        segments = _reidentify_segments_by_voice(audio_path, segments)
         label_map = _build_label_map(segments)
         assigned_words = _assign_speakers(
             word_timestamps,
@@ -85,6 +94,148 @@ def _run_diarization(audio_path: Path) -> list[tuple[float, float, str]]:
 
     logger.info("Sortformer diarization complete: %d segments", len(valid_segments))
     return valid_segments
+
+
+def _reidentify_segments_by_voice(
+    audio_path: Path,
+    segments: list[tuple[float, float, str]],
+) -> list[tuple[float, float, str]]:
+    """Relabel diarization segments by voice embedding similarity."""
+    if not SPEAKER_REID_ENABLED or len(segments) < 2:
+        return segments
+
+    try:
+        embeddings = _extract_segment_embeddings(audio_path, segments)
+        cluster_labels = _cluster_embeddings(embeddings, SPEAKER_EMBEDDING_THRESHOLD)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Speaker voice re-identification failed; using Sortformer labels: %s", exc)
+        return segments
+
+    relabeled: list[tuple[float, float, str]] = []
+    for (start, end, original_label), cluster_label in zip(segments, cluster_labels):
+        relabeled.append((start, end, cluster_label or original_label))
+
+    changed = sum(
+        1
+        for before, after in zip(segments, relabeled)
+        if before[2] != after[2]
+    )
+    logger.info("Speaker voice re-identification complete: %d segments relabeled", changed)
+    return relabeled
+
+
+def _extract_segment_embeddings(
+    audio_path: Path,
+    segments: list[tuple[float, float, str]],
+) -> list[np.ndarray | None]:
+    """Extract TitaNet speaker embeddings for each speech segment."""
+    import torch  # runtime dependency
+    from nemo.collections.asr.models import EncDecSpeakerLabelModel  # runtime dependency
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    speaker_model = EncDecSpeakerLabelModel.from_pretrained(
+        model_name=SPEAKER_EMBEDDING_MODEL
+    )
+    speaker_model.eval()
+    if hasattr(speaker_model, "to"):
+        speaker_model.to(torch.device(device))
+
+    embeddings: list[np.ndarray | None] = []
+    for start, end, _ in segments:
+        duration = end - start
+        if duration < SPEAKER_EMBEDDING_MIN_SEC:
+            embeddings.append(None)
+            continue
+
+        tmp_path = _extract_audio_segment(audio_path, start, duration)
+        try:
+            embedding = speaker_model.get_embedding(str(tmp_path))
+            vector = _to_numpy_vector(embedding)
+            embeddings.append(_normalize_vector(vector))
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+    return embeddings
+
+
+def _extract_audio_segment(audio_path: Path, start: float, duration: float) -> Path:
+    """Extract a 16kHz mono WAV slice for speaker embedding."""
+    import ffmpeg  # runtime dependency
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    tmp.close()
+    tmp_path = Path(tmp.name)
+
+    try:
+        (
+            ffmpeg
+            .input(str(audio_path), ss=max(0.0, start))
+            .output(
+                str(tmp_path),
+                t=max(0.1, duration),
+                ar=16000,
+                ac=1,
+                format="wav",
+                **{"y": None},
+            )
+            .run(quiet=True)
+        )
+    except ffmpeg.Error as exc:
+        tmp_path.unlink(missing_ok=True)
+        detail = exc.stderr.decode(errors="replace") if exc.stderr else str(exc)
+        raise RuntimeError(f"Speaker segment extraction failed: {detail}") from exc
+
+    return tmp_path
+
+
+def _to_numpy_vector(embedding: Any) -> np.ndarray:
+    """Convert a NeMo embedding tensor/list to a flat numpy vector."""
+    if hasattr(embedding, "detach"):
+        embedding = embedding.detach().cpu().numpy()
+    return np.asarray(embedding, dtype=np.float32).reshape(-1)
+
+
+def _normalize_vector(vector: np.ndarray) -> np.ndarray:
+    """L2-normalize an embedding vector."""
+    norm = float(np.linalg.norm(vector))
+    return vector / norm if norm > 0 else vector
+
+
+def _cluster_embeddings(
+    embeddings: list[np.ndarray | None],
+    threshold: float,
+) -> list[str | None]:
+    """Assign stable voice cluster labels using cosine similarity."""
+    centroids: list[np.ndarray] = []
+    counts: list[int] = []
+    labels: list[str | None] = []
+
+    for embedding in embeddings:
+        if embedding is None:
+            labels.append(None)
+            continue
+
+        if not centroids:
+            centroids.append(embedding)
+            counts.append(1)
+            labels.append("Voice_00")
+            continue
+
+        scores = [float(np.dot(embedding, centroid)) for centroid in centroids]
+        best_index = int(np.argmax(scores))
+        if scores[best_index] >= threshold:
+            labels.append(f"Voice_{best_index:02d}")
+            count = counts[best_index] + 1
+            centroids[best_index] = _normalize_vector(
+                (centroids[best_index] * counts[best_index] + embedding) / count
+            )
+            counts[best_index] = count
+        else:
+            centroids.append(embedding)
+            counts.append(1)
+            labels.append(f"Voice_{len(centroids) - 1:02d}")
+
+    return labels
 
 
 def _model_source() -> str:
