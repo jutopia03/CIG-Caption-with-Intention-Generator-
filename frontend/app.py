@@ -201,19 +201,41 @@ function() {
         lastSentenceId = currentSentence.sentence_id;
         const color = speakerColorMap[currentSentence.speaker] || '#FFFFFF';
         let html = '';
-        for (const word of currentSentence.words) {
-          const emoClass = EMOTION_CLASS[word.emotion] || '';
+        if (currentSentence.text_translated) {
+          // 번역 모드: 문장 전체를 하나의 span으로 표시
+          const words = currentSentence.words;
+          const emotionCounts = {};
+          for (const w of words) { const em = w.emotion || 'neutral'; emotionCounts[em] = (emotionCounts[em] || 0) + 1; }
+          const dominantEmotion = Object.entries(emotionCounts).sort((a, b) => b[1] - a[1])[0][0];
+          const emoClass = EMOTION_CLASS[dominantEmotion] || '';
+          const avgVol = Math.round(words.reduce((s, w) => s + (w.volume_level || 3), 0) / words.length);
           html += '<span'
                + (emoClass ? ' class="' + emoClass + '"' : '')
-               + ' data-start="'   + word.timestamp_start        + '"'
-               + ' data-end="'     + word.timestamp_end          + '"'
-               + ' data-volume="'  + word.volume_level           + '"'
-               + ' data-emotion="' + (word.emotion || 'neutral') + '"'
+               + ' data-start="'   + words[0].timestamp_start              + '"'
+               + ' data-end="'     + words[words.length - 1].timestamp_end + '"'
+               + ' data-volume="'  + avgVol                                + '"'
+               + ' data-emotion="' + dominantEmotion                       + '"'
                + ' style="display:inline-block; margin:0 4px; color:' + color
                + '; font-size:' + scaledPx(BASE_FONT_SIZE, window.cigSubtitleSettings.fontScale)
-               + '; font-weight:400; opacity:0.6;'
+               + '; font-weight:400; opacity:1.0;'
                + ' transition:font-size 0.08s ease, opacity 0.08s ease;">'
-               + word.word + '</span>';
+               + currentSentence.text_translated + '</span>';
+        } else {
+          // 원문 모드: 단어별 개별 span
+          for (const word of currentSentence.words) {
+            const emoClass = EMOTION_CLASS[word.emotion] || '';
+            html += '<span'
+                 + (emoClass ? ' class="' + emoClass + '"' : '')
+                 + ' data-start="'   + word.timestamp_start        + '"'
+                 + ' data-end="'     + word.timestamp_end          + '"'
+                 + ' data-volume="'  + word.volume_level           + '"'
+                 + ' data-emotion="' + (word.emotion || 'neutral') + '"'
+                 + ' style="display:inline-block; margin:0 4px; color:' + color
+                 + '; font-size:' + scaledPx(BASE_FONT_SIZE, window.cigSubtitleSettings.fontScale)
+                 + '; font-weight:400; opacity:0.6;'
+                 + ' transition:font-size 0.08s ease, opacity 0.08s ease;">'
+                 + word.word + '</span>';
+          }
         }
         overlay.innerHTML = html;
       }
