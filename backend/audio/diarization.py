@@ -13,10 +13,12 @@ logger = logging.getLogger(__name__)
 
 SORTFORMER_MODEL_NAME: str = os.getenv(
     "SORTFORMER_MODEL_NAME",
-    "nvidia/diar_streaming_sortformer_4spk-v2",
+    "nvidia/diar_sortformer_4spk-v1",
 )
 SORTFORMER_MODEL_PATH: str = os.getenv("SORTFORMER_MODEL_PATH", "")
 SORTFORMER_BATCH_SIZE: int = int(os.getenv("SORTFORMER_BATCH_SIZE", "1"))
+SPEAKER_SMOOTH_MAX_SEC: float = float(os.getenv("SPEAKER_SMOOTH_MAX_SEC", "1.2"))
+SPEAKER_SMOOTH_MAX_WORDS: int = int(os.getenv("SPEAKER_SMOOTH_MAX_WORDS", "3"))
 _LABEL_PREFIX = "Character_"
 
 
@@ -31,7 +33,13 @@ def diarize(audio_path: str | Path, word_timestamps: list[dict]) -> list[dict]:
     try:
         segments = _run_diarization(audio_path)
         label_map = _build_label_map(segments)
-        return _assign_speakers(word_timestamps, segments, label_map, fallback_label)
+        assigned_words = _assign_speakers(
+            word_timestamps,
+            segments,
+            label_map,
+            fallback_label,
+        )
+        return _smooth_speaker_islands(assigned_words)
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "Sortformer diarization failed; assigning all words to '%s': %s",
@@ -163,3 +171,44 @@ def _assign_speakers(
         result.append(dict(word, speaker=best_label))
 
     return result
+
+
+def _smooth_speaker_islands(words: list[dict]) -> list[dict]:
+    """Merge short A-B-A speaker label flips back into the surrounding speaker."""
+    if len(words) < 3:
+        return words
+
+    groups: list[tuple[int, int, str]] = []
+    start = 0
+    for index, word in enumerate(words[1:], start=1):
+        if word.get("speaker") != words[start].get("speaker"):
+            groups.append((start, index, words[start].get("speaker", f"{_LABEL_PREFIX}A")))
+            start = index
+    groups.append((start, len(words), words[start].get("speaker", f"{_LABEL_PREFIX}A")))
+
+    smoothed = [dict(word) for word in words]
+    for group_index in range(1, len(groups) - 1):
+        prev_start, prev_end, prev_speaker = groups[group_index - 1]
+        curr_start, curr_end, curr_speaker = groups[group_index]
+        next_start, next_end, next_speaker = groups[group_index + 1]
+
+        if prev_speaker != next_speaker or curr_speaker == prev_speaker:
+            continue
+
+        duration = (
+            words[curr_end - 1]["timestamp_end"] - words[curr_start]["timestamp_start"]
+        )
+        word_count = curr_end - curr_start
+        if duration <= SPEAKER_SMOOTH_MAX_SEC or word_count <= SPEAKER_SMOOTH_MAX_WORDS:
+            for index in range(curr_start, curr_end):
+                smoothed[index]["speaker"] = prev_speaker
+
+    changed = sum(
+        1
+        for before, after in zip(words, smoothed)
+        if before.get("speaker") != after.get("speaker")
+    )
+    if changed:
+        logger.info("Speaker smoothing relabeled %d short-flip words", changed)
+
+    return smoothed

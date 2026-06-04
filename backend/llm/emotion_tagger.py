@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+from collections import Counter
 from typing import Any
 
 from dotenv import load_dotenv
@@ -217,6 +218,7 @@ def _post_to_ollama(user_prompt: str) -> str:
     payload: dict[str, Any] = {
         "model": LLM_MODEL,
         "stream": False,
+        "format": "json",
         "messages": [
             {"role": "system", "content": _SYSTEM_PROMPT},
             {"role": "user",   "content": user_prompt},
@@ -310,7 +312,7 @@ def _merge_results(
                 }
             )
 
-        sentence_speaker: str = word_list[0].get("speaker", "Character_A")
+        sentence_speaker = _majority_speaker(word_list)
         output.append(
             {
                 "sentence_id": llm_sent.get("sentence_id", sent_idx),
@@ -328,7 +330,7 @@ def _build_fallback(sentences: list[list[dict]]) -> list[dict]:
     return [
         {
             "sentence_id": i,
-            "speaker":     words[0].get("speaker", "Character_A"),
+            "speaker":     _majority_speaker(words),
             "text":        " ".join(w["word"] for w in words),
             "words":       [
                 {**w, "emotion": w.get("_rule_emotion") or FALLBACK_EMOTION}
@@ -337,3 +339,9 @@ def _build_fallback(sentences: list[list[dict]]) -> list[dict]:
         }
         for i, words in enumerate(sentences, start=1)
     ]
+
+
+def _majority_speaker(words: list[dict]) -> str:
+    """Return the most common speaker label in a sentence."""
+    speakers = [word.get("speaker", "Character_A") for word in words]
+    return Counter(speakers).most_common(1)[0][0] if speakers else "Character_A"

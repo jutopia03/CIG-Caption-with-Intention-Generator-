@@ -7,6 +7,7 @@ from backend.audio.diarization import (
     _assign_speakers,
     _build_label_map,
     _parse_segment,
+    _smooth_speaker_islands,
     diarize,
 )
 
@@ -55,6 +56,22 @@ def test_parse_sortformer_string_segment() -> None:
 
 def test_parse_sortformer_tuple_segment() -> None:
     assert _parse_segment((0.5, 2.1, "speaker_0")) == (0.5, 2.1, "speaker_0")
+
+
+def test_smooth_speaker_islands_merges_short_flip() -> None:
+    words = [
+        {"word": "a", "timestamp_start": 0.0, "timestamp_end": 0.3, "speaker": "Character_A"},
+        {"word": "b", "timestamp_start": 0.3, "timestamp_end": 0.6, "speaker": "Character_B"},
+        {"word": "c", "timestamp_start": 0.6, "timestamp_end": 0.9, "speaker": "Character_A"},
+    ]
+
+    result = _smooth_speaker_islands(words)
+
+    assert [word["speaker"] for word in result] == [
+        "Character_A",
+        "Character_A",
+        "Character_A",
+    ]
 
 
 def test_diarize_fallback_on_model_error(tmp_path: Path) -> None:
