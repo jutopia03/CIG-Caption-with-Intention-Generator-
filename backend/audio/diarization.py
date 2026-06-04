@@ -1,8 +1,9 @@
-"""Speaker diarization module — assigns speaker labels to each word via pyannote.audio."""
+"""Speaker diarization module using NVIDIA NeMo Sortformer."""
 
 import logging
 import os
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 
@@ -10,24 +11,21 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-_PIPELINE_ID = "pyannote/speaker-diarization-3.1"
+SORTFORMER_MODEL_NAME: str = os.getenv(
+    "SORTFORMER_MODEL_NAME",
+    "nvidia/diar_streaming_sortformer_4spk-v2",
+)
+SORTFORMER_MODEL_PATH: str = os.getenv("SORTFORMER_MODEL_PATH", "")
+SORTFORMER_BATCH_SIZE: int = int(os.getenv("SORTFORMER_BATCH_SIZE", "1"))
 _LABEL_PREFIX = "Character_"
 
 
 def diarize(audio_path: str | Path, word_timestamps: list[dict]) -> list[dict]:
-    """Runs pyannote speaker diarization and assigns speaker to each word.
-
-    Args:
-        audio_path: Path to 16kHz mono WAV file
-        word_timestamps: list of dicts with keys word, timestamp_start, timestamp_end
-                         (output of transcribe_from_audio())
-
-    Returns:
-        Same list with 'speaker' key added to each word dict.
-        Speaker labels are strings like 'Character_A', 'Character_B', etc.
-        Falls back to 'Character_A' if diarization fails or no segment matches.
-    """
+    """Run Sortformer diarization and assign speaker labels to each word."""
     audio_path = Path(audio_path)
+    if not audio_path.exists():
+        raise FileNotFoundError(f"Audio file not found: {audio_path}")
+
     fallback_label = f"{_LABEL_PREFIX}A"
 
     try:
@@ -35,44 +33,104 @@ def diarize(audio_path: str | Path, word_timestamps: list[dict]) -> list[dict]:
         label_map = _build_label_map(segments)
         return _assign_speakers(word_timestamps, segments, label_map, fallback_label)
     except Exception as exc:  # noqa: BLE001
-        logger.warning("화자 분리 실패, 전체 단어에 '%s' 할당: %s", fallback_label, exc)
+        logger.warning(
+            "Sortformer diarization failed; assigning all words to '%s': %s",
+            fallback_label,
+            exc,
+        )
         return [dict(w, speaker=fallback_label) for w in word_timestamps]
 
 
 def _run_diarization(audio_path: Path) -> list[tuple[float, float, str]]:
-    """Loads pyannote pipeline and returns list of (start, end, raw_label) segments."""
-    import torch  # 런타임 의존성
-    from pyannote.audio import Pipeline  # 런타임 의존성
-
-    auth_token: str | None = os.getenv("PYANNOTE_AUTH_TOKEN")
-    if not auth_token:
-        raise EnvironmentError("PYANNOTE_AUTH_TOKEN이 설정되지 않았습니다.")
+    """Load Sortformer and return a list of (start, end, raw_label) segments."""
+    import torch  # runtime dependency
+    from nemo.collections.asr.models import SortformerEncLabelModel  # runtime dependency
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    logger.info("pyannote 파이프라인 로드 중 (device=%s)", device)
+    logger.info("Sortformer loading (model=%s, device=%s)", _model_source(), device)
 
-    pipeline = Pipeline.from_pretrained(_PIPELINE_ID, token=auth_token)
-    pipeline.to(torch.device(device))
+    if SORTFORMER_MODEL_PATH:
+        diar_model = SortformerEncLabelModel.restore_from(
+            restore_path=SORTFORMER_MODEL_PATH,
+            map_location=device,
+            strict=False,
+        )
+    else:
+        diar_model = SortformerEncLabelModel.from_pretrained(SORTFORMER_MODEL_NAME)
 
-    diarization_output = pipeline(str(audio_path))
+    diar_model.eval()
+    if hasattr(diar_model, "to"):
+        diar_model.to(torch.device(device))
 
-    # pyannote 4.x returns DiarizeOutput; actual Annotation is in .speaker_diarization
-    annotation = (
-        diarization_output.speaker_diarization
-        if hasattr(diarization_output, "speaker_diarization")
-        else diarization_output
+    _configure_streaming_sortformer(diar_model)
+
+    predicted = diar_model.diarize(
+        audio=[str(audio_path)],
+        batch_size=SORTFORMER_BATCH_SIZE,
     )
+    first_audio = predicted[0] if predicted else []
+    segments = [_parse_segment(segment) for segment in first_audio]
+    valid_segments = [segment for segment in segments if segment is not None]
 
-    segments: list[tuple[float, float, str]] = [
-        (turn.start, turn.end, speaker)
-        for turn, _, speaker in annotation.itertracks(yield_label=True)
-    ]
-    logger.info("화자 분리 완료: %d개 구간 검출", len(segments))
-    return segments
+    if not valid_segments:
+        raise RuntimeError("Sortformer diarization returned no segments")
+
+    logger.info("Sortformer diarization complete: %d segments", len(valid_segments))
+    return valid_segments
+
+
+def _model_source() -> str:
+    """Return the configured Sortformer model source for logging."""
+    return SORTFORMER_MODEL_PATH or SORTFORMER_MODEL_NAME
+
+
+def _configure_streaming_sortformer(diar_model: Any) -> None:
+    """Apply optional streaming Sortformer parameters from environment variables."""
+    modules = getattr(diar_model, "sortformer_modules", None)
+    if modules is None:
+        return
+
+    env_to_attr = {
+        "SORTFORMER_CHUNK_LEN": "chunk_len",
+        "SORTFORMER_RIGHT_CONTEXT": "chunk_right_context",
+        "SORTFORMER_FIFO_LEN": "fifo_len",
+        "SORTFORMER_SPKCACHE_UPDATE_PERIOD": "spkcache_update_period",
+        "SORTFORMER_SPKCACHE_LEN": "spkcache_len",
+    }
+    for env_name, attr_name in env_to_attr.items():
+        raw_value = os.getenv(env_name)
+        if raw_value:
+            setattr(modules, attr_name, int(raw_value))
+
+    check = getattr(modules, "_check_streaming_parameters", None)
+    if callable(check):
+        check()
+
+
+def _parse_segment(segment: Any) -> tuple[float, float, str] | None:
+    """Parse Sortformer segment formats into (start, end, speaker)."""
+    if isinstance(segment, str):
+        parts = segment.replace(",", " ").split()
+        if len(parts) < 3:
+            return None
+        return (float(parts[0]), float(parts[1]), parts[2])
+
+    if isinstance(segment, dict):
+        start = segment.get("start", segment.get("begin", segment.get("start_time")))
+        end = segment.get("end", segment.get("end_time"))
+        speaker = segment.get("speaker", segment.get("label", segment.get("speaker_id")))
+        if start is None or end is None or speaker is None:
+            return None
+        return (float(start), float(end), str(speaker))
+
+    if isinstance(segment, (list, tuple)) and len(segment) >= 3:
+        return (float(segment[0]), float(segment[1]), str(segment[2]))
+
+    return None
 
 
 def _build_label_map(segments: list[tuple[float, float, str]]) -> dict[str, str]:
-    """Maps raw pyannote SPEAKER_XX labels to Character_A, Character_B, ... in first-appearance order."""
+    """Map raw Sortformer speaker labels to Character_A, Character_B, ... order."""
     seen: dict[str, str] = {}
     for _, _, raw_label in segments:
         if raw_label not in seen:
@@ -87,7 +145,7 @@ def _assign_speakers(
     label_map: dict[str, str],
     fallback_label: str,
 ) -> list[dict]:
-    """Assigns a speaker label to each word based on greatest timestamp overlap."""
+    """Assign a speaker label to each word based on greatest timestamp overlap."""
     result: list[dict] = []
     for word in word_timestamps:
         w_start: float = word["timestamp_start"]

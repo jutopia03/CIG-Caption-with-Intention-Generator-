@@ -3,11 +3,10 @@
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 from backend.audio.diarization import (
     _assign_speakers,
     _build_label_map,
+    _parse_segment,
     diarize,
 )
 
@@ -50,15 +49,23 @@ def test_build_label_map_order() -> None:
     assert label_map["SPEAKER_00"] == "Character_B"
 
 
-def test_diarize_fallback_on_missing_token(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    monkeypatch.delenv("PYANNOTE_AUTH_TOKEN", raising=False)
+def test_parse_sortformer_string_segment() -> None:
+    assert _parse_segment("0.50 2.10 speaker_0") == (0.5, 2.1, "speaker_0")
+
+
+def test_parse_sortformer_tuple_segment() -> None:
+    assert _parse_segment((0.5, 2.1, "speaker_0")) == (0.5, 2.1, "speaker_0")
+
+
+def test_diarize_fallback_on_model_error(tmp_path: Path) -> None:
     dummy_audio = tmp_path / "audio.wav"
     dummy_audio.write_bytes(b"")
 
-    result = diarize(str(dummy_audio), list(_WORDS))
+    with patch(
+        "backend.audio.diarization._run_diarization",
+        side_effect=RuntimeError("mock model error"),
+    ):
+        result = diarize(str(dummy_audio), list(_WORDS))
 
     assert all(w["speaker"] == "Character_A" for w in result)
     for original, tagged in zip(_WORDS, result):

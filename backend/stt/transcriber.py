@@ -9,12 +9,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-WHISPER_MODEL_SIZE: str = os.getenv("WHISPER_MODEL_SIZE", "tiny")
+WHISPER_MODEL_SIZE: str = os.getenv("WHISPER_MODEL_SIZE", "large-v3")
 
 logger = logging.getLogger(__name__)
 
 
-def transcribe(video_path: str | Path) -> list[dict]:
+def transcribe(video_path: str | Path, language: str | None = "en") -> list[dict]:
     """영상 파일을 전사하고 단어 단위 타임스탬프 목록을 반환한다.
 
     Args:
@@ -36,7 +36,7 @@ def transcribe(video_path: str | Path) -> list[dict]:
     tmp_audio: Path | None = None
     try:
         tmp_audio = _extract_audio(video_path)
-        words = _run_whisper(tmp_audio)
+        words = _run_whisper(tmp_audio, language=language)
     finally:
         if tmp_audio is not None and tmp_audio.exists():
             tmp_audio.unlink()
@@ -44,7 +44,7 @@ def transcribe(video_path: str | Path) -> list[dict]:
     return words
 
 
-def transcribe_from_audio(audio_path: str | Path) -> list[dict]:
+def transcribe_from_audio(audio_path: str | Path, language: str | None = "en") -> list[dict]:
     """이미 추출된 오디오 파일을 전사하고 단어 단위 타임스탬프 목록을 반환한다.
 
     runner.py처럼 오디오를 한 번 추출하고 STT와 음향 분석 양쪽에 넘겨야 할 때 사용.
@@ -65,7 +65,7 @@ def transcribe_from_audio(audio_path: str | Path) -> list[dict]:
         raise FileNotFoundError(f"오디오 파일을 찾을 수 없습니다: {audio_path}")
 
     logger.info("STT(오디오) 시작: %s", audio_path)
-    return _run_whisper(audio_path)
+    return _run_whisper(audio_path, language=language)
 
 
 def _extract_audio(video_path: Path) -> Path:
@@ -98,18 +98,18 @@ def _extract_audio(video_path: Path) -> Path:
     return tmp_path
 
 
-def _run_whisper(audio_path: Path) -> list[dict]:
+def _run_whisper(audio_path: Path, language: str | None = "en") -> list[dict]:
     """Whisper 모델을 로드하고 단어 단위 타임스탬프를 파싱한다."""
     import whisper  # 런타임 의존성 — 테스트 시 모킹 가능
 
     model = whisper.load_model(WHISPER_MODEL_SIZE)
     logger.info("Whisper 모델 로드 완료: %s", WHISPER_MODEL_SIZE)
 
-    result = model.transcribe(
-        str(audio_path),
-        word_timestamps=True,
-        language="en",
-    )
+    transcribe_options: dict[str, object] = {"word_timestamps": True}
+    if language:
+        transcribe_options["language"] = language
+
+    result = model.transcribe(str(audio_path), **transcribe_options)
 
     segments = result.get("segments") or []
     words: list[dict] = []

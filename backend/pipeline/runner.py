@@ -10,9 +10,10 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from backend.audio.analyzer import analyze
+from backend.audio.diarization import diarize
 from backend.llm.emotion_tagger import tag_emotions
 from backend.schemas.word_schema import Sentence
-from backend.stt.assemblyai_transcriber import transcribe_with_speaker
+from backend.stt.transcriber import transcribe_from_audio
 from backend.translation.translator import translate_sentences
 
 from collections.abc import Callable
@@ -37,7 +38,8 @@ class PipelineStep:
 
 PIPELINE_STEPS: list[PipelineStep] = [
     PipelineStep("ffmpeg", 10, "ffmpeg 완료"),
-    PipelineStep("assemblyai", 30, "AssemblyAI 완료"),
+    PipelineStep("whisper", 30, "Whisper Large-v3 완료"),
+    PipelineStep("sortformer", 45, "Sortformer 완료"),
     PipelineStep("librosa", 50, "librosa 완료"),
     PipelineStep("llm", 70, "LLM 완료"),
     PipelineStep("pydantic", 90, "Pydantic 완료"),
@@ -74,11 +76,11 @@ def run(
     output_lang: str = "en",
     progress_callback: ProgressCallback | None = None,
 ) -> list[dict]:
-    """영상 파일을 받아 AssemblyAI STT+화자분리 → 음향 분석 → 감정 태깅을 순서대로 실행한다.
+    """영상 파일을 받아 Whisper STT → Sortformer 화자분리 → 음향 분석 → 감정 태깅을 순서대로 실행한다.
 
     Args:
         video_path: 처리할 영상 파일 경로
-        input_lang: 영상 원본 언어 코드 (AssemblyAI language_code, 기본값 "en")
+        input_lang: 영상 원본 언어 코드 (Whisper language, 기본값 "en")
         output_lang: 출력 언어 코드. "ko"일 때 DeepL 번역 단계를 추가 실행 (기본값 "en")
 
     Returns:
@@ -111,20 +113,33 @@ def run(
             "ffmpeg",
         )
 
-        # 1단계: AssemblyAI STT + 화자 분리
+        # 1단계: Whisper Large-v3 STT
         t0 = time.time()
         try:
-            word_timestamps = transcribe_with_speaker(str(tmp_audio), language_code=input_lang)
+            word_timestamps = transcribe_from_audio(str(tmp_audio), language=input_lang)
         except Exception as e:
-            raise RuntimeError(f"파이프라인 실패 [AssemblyAI STT+화자분리 단계]: {e}") from e
-        logger.info("AssemblyAI STT+화자분리 완료: %.1f초", time.time() - t0)
+            raise RuntimeError(f"파이프라인 실패 [Whisper STT 단계]: {e}") from e
+        logger.info("Whisper STT 완료: %.1f초", time.time() - t0)
         notify_progress(
             progress_callback,
             active_steps,
-            "assemblyai",
+            "whisper",
         )
 
-        # 2단계: 음향 분석
+        # 2단계: NVIDIA NeMo Sortformer 화자 분리
+        t0 = time.time()
+        try:
+            word_timestamps = diarize(str(tmp_audio), word_timestamps)
+        except Exception as e:
+            raise RuntimeError(f"파이프라인 실패 [Sortformer 화자분리 단계]: {e}") from e
+        logger.info("Sortformer 화자분리 완료: %.1f초", time.time() - t0)
+        notify_progress(
+            progress_callback,
+            active_steps,
+            "sortformer",
+        )
+
+        # 3단계: 음향 분석
         t0 = time.time()
         try:
             analyzed_words = analyze(str(tmp_audio), word_timestamps)
@@ -137,7 +152,7 @@ def run(
             "librosa",
         )
 
-        # 3단계: LLM 감정 추론
+        # 4단계: LLM 감정 추론
         t0 = time.time()
         try:
             final_result = tag_emotions(analyzed_words)

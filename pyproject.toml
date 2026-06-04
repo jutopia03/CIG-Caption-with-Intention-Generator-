@@ -18,8 +18,9 @@ dependencies = [
     "ffmpeg-python",
     "torch",
     "torchaudio",
-    "pyannote.audio>=3.1",
-    "assemblyai>=0.17",
+    "nemo_toolkit[asr]",
+    "huggingface-hub",
+    "requests",
     "deepl>=1.18",
 ]
 

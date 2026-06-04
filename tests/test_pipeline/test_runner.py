@@ -15,9 +15,14 @@ _WORD_TIMESTAMPS = [
     {"word": "know", "timestamp_start": 1.14, "timestamp_end": 1.28},
 ]
 
+_SPEAKER_WORDS = [
+    {"word": "You", "timestamp_start": 0.70, "timestamp_end": 1.14, "speaker": "Character_A"},
+    {"word": "know", "timestamp_start": 1.14, "timestamp_end": 1.28, "speaker": "Character_A"},
+]
+
 _ANALYZED_WORDS = [
-    {"word": "You",  "timestamp_start": 0.70, "timestamp_end": 1.14, "volume_level": 3, "pitch_level": 2},
-    {"word": "know", "timestamp_start": 1.14, "timestamp_end": 1.28, "volume_level": 3, "pitch_level": 1},
+    {"word": "You",  "timestamp_start": 0.70, "timestamp_end": 1.14, "speaker": "Character_A", "volume_level": 3, "pitch_level": 2},
+    {"word": "know", "timestamp_start": 1.14, "timestamp_end": 1.28, "speaker": "Character_A", "volume_level": 3, "pitch_level": 1},
 ]
 
 _FINAL_RESULT = [
@@ -55,9 +60,10 @@ def _run_with_mocks(tmp_path: Path):
 
     with (
         patch("backend.pipeline.runner._extract_audio", return_value=fake_audio),
-        patch("backend.pipeline.runner.transcribe_with_speaker",    return_value=_WORD_TIMESTAMPS),
-        patch("backend.pipeline.runner.analyze",       return_value=_ANALYZED_WORDS),
-        patch("backend.pipeline.runner.tag_emotions",  return_value=_FINAL_RESULT),
+        patch("backend.pipeline.runner.transcribe_from_audio", return_value=_WORD_TIMESTAMPS),
+        patch("backend.pipeline.runner.diarize", return_value=_SPEAKER_WORDS),
+        patch("backend.pipeline.runner.analyze", return_value=_ANALYZED_WORDS),
+        patch("backend.pipeline.runner.tag_emotions", return_value=_FINAL_RESULT),
     ):
         fake_video = tmp_path / "video.mp4"
         fake_video.touch()
@@ -89,8 +95,12 @@ def test_run_pipeline_order(tmp_path):
     call_order: list[str] = []
 
     def fake_transcribe(*a, **kw):
-        call_order.append("transcribe_with_speaker")
+        call_order.append("transcribe_from_audio")
         return _WORD_TIMESTAMPS
+
+    def fake_diarize(*a, **kw):
+        call_order.append("diarize")
+        return _SPEAKER_WORDS
 
     def fake_analyze(*a, **kw):
         call_order.append("analyze")
@@ -106,14 +116,15 @@ def test_run_pipeline_order(tmp_path):
 
     with (
         patch("backend.pipeline.runner._extract_audio", return_value=fake_audio),
-        patch("backend.pipeline.runner.transcribe_with_speaker",    side_effect=fake_transcribe),
-        patch("backend.pipeline.runner.analyze",       side_effect=fake_analyze),
-        patch("backend.pipeline.runner.tag_emotions",  side_effect=fake_tag),
+        patch("backend.pipeline.runner.transcribe_from_audio", side_effect=fake_transcribe),
+        patch("backend.pipeline.runner.diarize", side_effect=fake_diarize),
+        patch("backend.pipeline.runner.analyze", side_effect=fake_analyze),
+        patch("backend.pipeline.runner.tag_emotions", side_effect=fake_tag),
     ):
         from backend.pipeline.runner import run
         run(str(fake_video))
 
-    assert call_order == ["transcribe_with_speaker", "analyze", "tag_emotions"]
+    assert call_order == ["transcribe_from_audio", "diarize", "analyze", "tag_emotions"]
 
 
 def test_run_tmp_audio_deleted_on_success(tmp_path):
@@ -124,9 +135,10 @@ def test_run_tmp_audio_deleted_on_success(tmp_path):
 
     with (
         patch("backend.pipeline.runner._extract_audio", return_value=fake_audio),
-        patch("backend.pipeline.runner.transcribe_with_speaker",    return_value=_WORD_TIMESTAMPS),
-        patch("backend.pipeline.runner.analyze",       return_value=_ANALYZED_WORDS),
-        patch("backend.pipeline.runner.tag_emotions",  return_value=_FINAL_RESULT),
+        patch("backend.pipeline.runner.transcribe_from_audio", return_value=_WORD_TIMESTAMPS),
+        patch("backend.pipeline.runner.diarize", return_value=_SPEAKER_WORDS),
+        patch("backend.pipeline.runner.analyze", return_value=_ANALYZED_WORDS),
+        patch("backend.pipeline.runner.tag_emotions", return_value=_FINAL_RESULT),
     ):
         from backend.pipeline.runner import run
         run(str(fake_video))
@@ -142,7 +154,7 @@ def test_run_tmp_audio_deleted_on_failure(tmp_path):
 
     with (
         patch("backend.pipeline.runner._extract_audio", return_value=fake_audio),
-        patch("backend.pipeline.runner.transcribe_with_speaker", side_effect=RuntimeError("STT 오류")),
+        patch("backend.pipeline.runner.transcribe_from_audio", side_effect=RuntimeError("STT 오류")),
     ):
         from backend.pipeline.runner import run
 
