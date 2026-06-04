@@ -13,6 +13,7 @@ from backend.audio.analyzer import analyze
 from backend.llm.emotion_tagger import tag_emotions
 from backend.schemas.word_schema import Sentence
 from backend.stt.assemblyai_transcriber import transcribe_with_speaker
+from backend.translation.translator import translate_sentences
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -69,13 +70,16 @@ def notify_progress(
 
 def run(
     video_path: str | Path,
-    output_lang: str = "ko",
+    input_lang: str = "en",
+    output_lang: str = "en",
     progress_callback: ProgressCallback | None = None,
 ) -> list[dict]:
     """영상 파일을 받아 AssemblyAI STT+화자분리 → 음향 분석 → 감정 태깅을 순서대로 실행한다.
 
     Args:
         video_path: 처리할 영상 파일 경로
+        input_lang: 영상 원본 언어 코드 (AssemblyAI language_code, 기본값 "en")
+        output_lang: 출력 언어 코드. "ko"일 때 DeepL 번역 단계를 추가 실행 (기본값 "en")
 
     Returns:
         Sentence 스키마에 맞는 dict 목록
@@ -110,7 +114,7 @@ def run(
         # 1단계: AssemblyAI STT + 화자 분리
         t0 = time.time()
         try:
-            word_timestamps = transcribe_with_speaker(str(tmp_audio))
+            word_timestamps = transcribe_with_speaker(str(tmp_audio), language_code=input_lang)
         except Exception as e:
             raise RuntimeError(f"파이프라인 실패 [AssemblyAI STT+화자분리 단계]: {e}") from e
         logger.info("AssemblyAI STT+화자분리 완료: %.1f초", time.time() - t0)
@@ -167,6 +171,15 @@ def run(
         active_steps,
         "json",
     )
+
+    # 4단계: 번역 (output_lang == "ko"일 때만 실행)
+    if output_lang == "ko":
+        t0 = time.time()
+        try:
+            validated = translate_sentences(validated, target_lang="KO")
+        except Exception as e:
+            raise RuntimeError(f"파이프라인 실패 [번역 단계]: {e}") from e
+        logger.info("번역 완료: %.1f초", time.time() - t0)
 
     logger.info("파이프라인 완료: 총 %d개 문장, 전체 소요 %.1f초", len(validated), time.time() - pipeline_start)
     return validated

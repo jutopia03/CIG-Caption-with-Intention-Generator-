@@ -20,6 +20,7 @@ dependencies = [
     "torchaudio",
     "pyannote.audio>=3.1",
     "assemblyai>=0.17",
+    "deepl>=1.18",
 ]
 
 [project.optional-dependencies]

@@ -10,11 +10,12 @@ ASSEMBLYAI_API_KEY: str = os.getenv("ASSEMBLYAI_API_KEY", "")
 logger = logging.getLogger(__name__)
 
 
-def transcribe_with_speaker(audio_path: str | Path) -> list[dict]:
+def transcribe_with_speaker(audio_path: str | Path, language_code: str = "en") -> list[dict]:
     """AssemblyAI로 STT + 화자 분리를 동시에 수행한다.
 
     Args:
         audio_path: 16kHz mono WAV 파일 경로
+        language_code: AssemblyAI 언어 코드 (기본값 "en"). 예: "ko", "ja", "fr"
 
     Returns:
         [{"word": str, "timestamp_start": float, "timestamp_end": float, "speaker": str}, ...]
@@ -28,22 +29,24 @@ def transcribe_with_speaker(audio_path: str | Path) -> list[dict]:
     if not audio_path.exists():
         raise FileNotFoundError(f"오디오 파일을 찾을 수 없습니다: {audio_path}")
     logger.info("AssemblyAI STT 시작: %s", audio_path)
-    transcript = _call_assemblyai(audio_path)
+    transcript = _call_assemblyai(audio_path, language_code)
     _check_transcript_status(transcript)
     words = _extract_words(transcript)
     logger.info("AssemblyAI STT 완료: 총 %d개 단어 추출", len(words))
     return words
 
 
-def _call_assemblyai(audio_path: Path):  # type: ignore[return]
+def _call_assemblyai(audio_path: Path, language_code: str):  # type: ignore[return]
     """AssemblyAI SDK로 전사 요청을 보내고 Transcript 객체를 반환한다."""
     import assemblyai as aai  # 런타임 의존성 — 테스트 시 모킹 가능
 
     aai.settings.api_key = ASSEMBLYAI_API_KEY
+    # universal-3-pro 한국어 미지원으로 ko 요청 시 universal-2 사용
+    speech_models = ["universal-2"] if language_code == "ko" else ["universal-3-pro"]
     config = aai.TranscriptionConfig(
         speaker_labels=True,
-        language_code="en",
-        speech_models=["universal-3-pro"],
+        language_code=language_code,
+        speech_models=speech_models,
     )
     return aai.Transcriber().transcribe(str(audio_path), config)
 
