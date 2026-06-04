@@ -55,7 +55,7 @@ def _run_with_mocks(tmp_path: Path):
 
     with (
         patch("backend.pipeline.runner._extract_audio", return_value=fake_audio),
-        patch("backend.pipeline.runner.transcribe_from_audio",    return_value=_WORD_TIMESTAMPS),
+        patch("backend.pipeline.runner.transcribe_with_speaker",    return_value=_WORD_TIMESTAMPS),
         patch("backend.pipeline.runner.analyze",       return_value=_ANALYZED_WORDS),
         patch("backend.pipeline.runner.tag_emotions",  return_value=_FINAL_RESULT),
     ):
@@ -89,7 +89,7 @@ def test_run_pipeline_order(tmp_path):
     call_order: list[str] = []
 
     def fake_transcribe(*a, **kw):
-        call_order.append("transcribe_from_audio")
+        call_order.append("transcribe_with_speaker")
         return _WORD_TIMESTAMPS
 
     def fake_analyze(*a, **kw):
@@ -106,14 +106,14 @@ def test_run_pipeline_order(tmp_path):
 
     with (
         patch("backend.pipeline.runner._extract_audio", return_value=fake_audio),
-        patch("backend.pipeline.runner.transcribe_from_audio",    side_effect=fake_transcribe),
+        patch("backend.pipeline.runner.transcribe_with_speaker",    side_effect=fake_transcribe),
         patch("backend.pipeline.runner.analyze",       side_effect=fake_analyze),
         patch("backend.pipeline.runner.tag_emotions",  side_effect=fake_tag),
     ):
         from backend.pipeline.runner import run
         run(str(fake_video))
 
-    assert call_order == ["transcribe_from_audio", "analyze", "tag_emotions"]
+    assert call_order == ["transcribe_with_speaker", "analyze", "tag_emotions"]
 
 
 def test_run_tmp_audio_deleted_on_success(tmp_path):
@@ -124,7 +124,7 @@ def test_run_tmp_audio_deleted_on_success(tmp_path):
 
     with (
         patch("backend.pipeline.runner._extract_audio", return_value=fake_audio),
-        patch("backend.pipeline.runner.transcribe_from_audio",    return_value=_WORD_TIMESTAMPS),
+        patch("backend.pipeline.runner.transcribe_with_speaker",    return_value=_WORD_TIMESTAMPS),
         patch("backend.pipeline.runner.analyze",       return_value=_ANALYZED_WORDS),
         patch("backend.pipeline.runner.tag_emotions",  return_value=_FINAL_RESULT),
     ):
@@ -142,11 +142,11 @@ def test_run_tmp_audio_deleted_on_failure(tmp_path):
 
     with (
         patch("backend.pipeline.runner._extract_audio", return_value=fake_audio),
-        patch("backend.pipeline.runner.transcribe_from_audio", side_effect=RuntimeError("STT 오류")),
+        patch("backend.pipeline.runner.transcribe_with_speaker", side_effect=RuntimeError("STT 오류")),
     ):
         from backend.pipeline.runner import run
 
-        with pytest.raises(RuntimeError, match="STT 단계"):
+        with pytest.raises(RuntimeError, match="STT"):
             run(str(fake_video))
 
     fake_audio.unlink.assert_called_once()
